@@ -1,0 +1,223 @@
+version: "3.9"
+
+# ==========================================================================
+# ERP Web Intelligent - Environnement de developpement conteneurise
+# Lancer tout l'environnement :  docker compose up -d
+# Voir les logs d'un service  :  docker compose logs -f <service>
+# Tout arreter                :  docker compose down
+# Tout arreter + supprimer les donnees : docker compose down -v
+# ==========================================================================
+
+networks:
+  erp-network:
+    driver: bridge
+
+volumes:
+  pg_erp_data:
+  pg_airflow_data:
+  minio_data:
+
+services:
+  # ------------------------------------------------------------------------
+  # BASE DE DONNEES ERP (coeur transactionnel de l'application)
+  # ------------------------------------------------------------------------
+  postgres-erp:
+    image: postgres:16
+    container_name: postgres-erp
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${ERP_DB_USER:-erp_user}
+      POSTGRES_PASSWORD: ${ERP_DB_PASSWORD:-erp_password}
+      POSTGRES_DB: ${ERP_DB_NAME:-erp_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_erp_data:/var/lib/postgresql/data
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ERP_DB_USER:-erp_user} -d ${ERP_DB_NAME:-erp_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ------------------------------------------------------------------------
+  # BACKEND API (a construire : votre code ERP)
+  # Decommentez ce service une fois que le dossier ./backend contient
+  # un Dockerfile et votre code (Spring Boot, Node.js, etc.)
+  # ------------------------------------------------------------------------
+  # backend:
+  #   build: ./backend
+  #   container_name: erp-backend
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   depends_on:
+  #     postgres-erp:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8000:8000"
+  #   networks:
+  #     - erp-network
+
+  # ------------------------------------------------------------------------
+  # FRONTEND WEB (a construire : votre interface ERP)
+  # Decommentez ce service une fois que le dossier ./frontend contient
+  # un Dockerfile et votre code (React, Angular, Vue...)
+  # ------------------------------------------------------------------------
+  # frontend:
+  #   build: ./frontend
+  #   container_name: erp-frontend
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - backend
+  #   ports:
+  #     - "3000:3000"
+  #   networks:
+  #     - erp-network
+
+  # ------------------------------------------------------------------------
+  # STOCKAGE OBJET / DATA LAKE (equivalent local d'un service cloud type S3)
+  # Console web : http://localhost:9001  (identifiants ci-dessous)
+  # ------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_password}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Cree automatiquement les buckets (zones du data lake) au demarrage
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - erp-network
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio_admin} ${MINIO_ROOT_PASSWORD:-minio_password};
+      mc mb -p local/raw;
+      mc mb -p local/staging;
+      mc mb -p local/curated;
+      exit 0;
+      "
+
+  # ------------------------------------------------------------------------
+  # BASE DE DONNEES DEDIEE A AIRFLOW (metadonnees des pipelines)
+  # ------------------------------------------------------------------------
+  postgres-airflow:
+    image: postgres:16
+    container_name: postgres-airflow
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - pg_airflow_data:/var/lib/postgresql/data
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Initialise la base Airflow et cree l'utilisateur admin (se lance une fois puis s'arrete)
+  airflow-init:
+    image: apache/airflow:2.9.3
+    container_name: airflow-init
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+    entrypoint: >
+      /bin/bash -c "
+      airflow db migrate &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+      "
+    networks:
+      - erp-network
+
+  # Interface web Airflow : http://localhost:8080  (admin / admin)
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    ports:
+      - "8080:8080"
+    command: webserver
+    networks:
+      - erp-network
+
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: scheduler
+    networks:
+      - erp-network
+
+  # ------------------------------------------------------------------------
+  # TRAITEMENT DISTRIBUE (Spark)
+  # Interface web du master : http://localhost:8081
+  # ------------------------------------------------------------------------
+  spark-master:
+    image: bitnami/spark:3.5
+    container_name: spark-master
+    restart: unless-stopped
+    environment:
+      SPARK_MODE: master
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    networks:
+      - erp-network
+
+  spark-worker:
+    image: bitnami/spark:3.5
+    container_name: spark-worker
+    restart: unless-stopped
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+    networks:
+      - erp-network

@@ -4,6 +4,7 @@ version: "3.9"
 # ERP Web Intelligent - Environnement de developpement conteneurise
 # Lancer tout l'environnement :  docker compose up -d
 # Voir les logs d'un service  :  docker compose logs -f <service>
+# Verifier la config avant de lancer : docker compose config
 # Tout arreter                :  docker compose down
 # Tout arreter + supprimer les donnees : docker compose down -v
 # ==========================================================================
@@ -20,6 +21,8 @@ volumes:
 services:
   # ------------------------------------------------------------------------
   # BASE DE DONNEES ERP (coeur transactionnel de l'application)
+  # Les scripts dans backend/database/central sont executes automatiquement
+  # par l'image postgres UNIQUEMENT au tout premier demarrage (volume vide).
   # ------------------------------------------------------------------------
   postgres-erp:
     image: postgres:16
@@ -33,6 +36,7 @@ services:
       - "5432:5432"
     volumes:
       - pg_erp_data:/var/lib/postgresql/data
+      - ./backend/database/central:/docker-entrypoint-initdb.d
     networks:
       - erp-network
     healthcheck:
@@ -42,42 +46,42 @@ services:
       retries: 10
 
   # ------------------------------------------------------------------------
-  # BACKEND API (a construire : votre code ERP)
-  # Decommentez ce service une fois que le dossier ./backend contient
-  # un Dockerfile et votre code (Spring Boot, Node.js, etc.)
+  # BACKEND API
+  # Necessite un Dockerfile dans ./backend. Tant qu'il n'existe pas, ce
+  # service echouera au build : c'est normal, creez le Dockerfile en premier
+  # (voir note en bas de fichier).
   # ------------------------------------------------------------------------
-  # backend:
-  #   build: ./backend
-  #   container_name: erp-backend
-  #   restart: unless-stopped
-  #   env_file: .env
-  #   depends_on:
-  #     postgres-erp:
-  #       condition: service_healthy
-  #   ports:
-  #     - "8000:8000"
-  #   networks:
-  #     - erp-network
+  backend:
+    build: ./backend
+    container_name: erp-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres-erp:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    networks:
+      - erp-network
 
   # ------------------------------------------------------------------------
-  # FRONTEND WEB (a construire : votre interface ERP)
-  # Decommentez ce service une fois que le dossier ./frontend contient
-  # un Dockerfile et votre code (React, Angular, Vue...)
+  # FRONTEND WEB
   # ------------------------------------------------------------------------
-  # frontend:
-  #   build: ./frontend
-  #   container_name: erp-frontend
-  #   restart: unless-stopped
-  #   depends_on:
-  #     - backend
-  #   ports:
-  #     - "3000:3000"
-  #   networks:
-  #     - erp-network
+  frontend:
+    build: ./frontend
+    container_name: erp-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    networks:
+      - erp-network
 
   # ------------------------------------------------------------------------
   # STOCKAGE OBJET / DATA LAKE (equivalent local d'un service cloud type S3)
-  # Console web : http://localhost:9001  (identifiants ci-dessous)
+  # Console web : http://localhost:9001
   # ------------------------------------------------------------------------
   minio:
     image: minio/minio:latest
@@ -197,11 +201,12 @@ services:
   # Interface web du master : http://localhost:8081
   # ------------------------------------------------------------------------
   spark-master:
-    image: bitnami/spark:3.5
+    image: apache/spark:3.5.3
     container_name: spark-master
     restart: unless-stopped
-    environment:
-      SPARK_MODE: master
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+      --host spark-master --port 7077 --webui-port 8080
     ports:
       - "7077:7077"
       - "8081:8080"
@@ -209,15 +214,39 @@ services:
       - erp-network
 
   spark-worker:
-    image: bitnami/spark:3.5
+    image: apache/spark:3.5.3
     container_name: spark-worker
     restart: unless-stopped
     depends_on:
       - spark-master
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_MEMORY: 2G
-      SPARK_WORKER_CORES: 2
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077 --memory 2G --cores 2
     networks:
       - erp-network
+
+# ==========================================================================
+# NOTE IMPORTANTE - avant le premier "docker compose up -d" :
+#
+# 1. Le service "backend" a besoin d'un Dockerfile minimal dans ./backend/
+#    tant que le vrai code n'existe pas encore. Exemple de Dockerfile
+#    provisoire (Node.js) :
+#
+#      FROM node:20-alpine
+#      WORKDIR /app
+#      COPY package*.json ./
+#      RUN npm install
+#      COPY . .
+#      EXPOSE 8000
+#      CMD ["npm", "run", "dev"]
+#
+# 2. Le script backend/database/central/001_init_base_centrale.sql sera
+#    execute AUTOMATIQUEMENT par postgres-erp au tout premier demarrage
+#    (grace au volume monte sur /docker-entrypoint-initdb.d). Si vous
+#    modifiez ce script apres coup, il faudra faire
+#    "docker compose down -v" puis relancer pour qu'il soit repris en
+#    compte (le volume pg_erp_data conserve sinon les anciennes donnees).
+#
+# 3. Creez un fichier .env a la racine (copie de .env.example) avant de
+#    lancer, pour ne pas dependre des valeurs par defaut en dur.
+# ==========================================================================

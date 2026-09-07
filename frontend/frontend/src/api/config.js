@@ -2,11 +2,6 @@
 // En développement, elle pointe vers le backend local (voir docker-compose.yml).
 export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
-export async function apiGet(endpoint) {
-  const res = await fetch(`${API_BASE_URL}${endpoint}`);
-  return res.json();
-}
-
 export async function apiPost(endpoint, body) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
     method: "POST",
@@ -17,12 +12,7 @@ export async function apiPost(endpoint, body) {
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
-    // On attache la réponse complète à l'erreur : le frontend a besoin de
-    // savoir si un captcha ou un reCAPTCHA est désormais exigé, pas
-    // seulement qu'une erreur s'est produite.
-    const erreur = new Error(data?.message || "Une erreur est survenue.");
-    erreur.data = data;
-    throw erreur;
+    throw new Error(data?.message || "Une erreur est survenue.");
   }
 
   return data;

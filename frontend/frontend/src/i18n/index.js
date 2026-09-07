@@ -12,11 +12,6 @@ const resources = {
   fr: {
     translation: {
       connexion_titre: "Connexion",
-      nav_accueil: "Accueil",
-      nav_fonctionnalites: "Fonctionnalités",
-      nav_tarifs: "Tarifs",
-      nav_connexion: "Connexion",
-      nav_inscription: "Inscription",
       connexion_soustitre: "Accédez à votre espace de gestion",
       email: "Adresse e-mail",
       mot_de_passe: "Mot de passe",
@@ -44,11 +39,6 @@ const resources = {
   en: {
     translation: {
       connexion_titre: "Sign in",
-      nav_accueil: "Home",
-      nav_fonctionnalites: "Features",
-      nav_tarifs: "Pricing",
-      nav_connexion: "Sign in",
-      nav_inscription: "Sign up",
       connexion_soustitre: "Access your workspace",
       email: "Email address",
       mot_de_passe: "Password",
@@ -76,11 +66,6 @@ const resources = {
   ar: {
     translation: {
       connexion_titre: "تسجيل الدخول",
-      nav_accueil: "الرئيسية",
-      nav_fonctionnalites: "الميزات",
-      nav_tarifs: "الأسعار",
-      nav_connexion: "تسجيل الدخول",
-      nav_inscription: "إنشاء حساب",
       connexion_soustitre: "ادخل إلى مساحة العمل الخاصة بك",
       email: "البريد الإلكتروني",
       mot_de_passe: "كلمة المرور",

@@ -1,39 +1,30 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { apiPost } from "../api/config";
-import { LANGUES } from "../i18n";
 import ReseauDecoratif from "../components/ReseauDecoratif";
 
-export default function Connexion() {
-  const { t, i18n } = useTranslation();
+export default function Inscription() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
 
+  const [nom, setNom] = useState("");
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
   const [erreur, setErreur] = useState("");
+  const [succes, setSucces] = useState(false);
   const [enCours, setEnCours] = useState(false);
 
-  function changerLangue(code, dir) {
-    i18n.changeLanguage(code);
-    document.documentElement.dir = dir;
-    document.documentElement.lang = code;
-  }
-
-  async function gererConnexion(e) {
+  async function gererInscription(e) {
     e.preventDefault();
     setErreur("");
     setEnCours(true);
-
     try {
-      // Correspond au diagramme de séquence "Routage multi-tenant" :
-      // le backend identifie l'entreprise depuis l'email, sélectionne sa
-      // base dédiée, puis renvoie un token contenant les rôles.
-      const data = await apiPost("/auth/login", { email, motDePasse });
-      localStorage.setItem("token", data.token);
-      navigate("/dashboard");
+      await apiPost("/auth/register", { nom, email, motDePasse });
+      setSucces(true);
+      setTimeout(() => navigate("/"), 1500);
     } catch (err) {
-      setErreur(t("erreur_identifiants"));
+      setErreur(err.data?.message || "Une erreur est survenue.");
     } finally {
       setEnCours(false);
     }
@@ -43,7 +34,6 @@ export default function Connexion() {
     <div className="connexion-layout">
       <aside className="connexion-marque">
         <ReseauDecoratif />
-        <div className="connexion-marque__logo">BENJEDDOU ERP</div>
         <div className="connexion-marque__corps">
           <h1 className="connexion-marque__titre">{t("marque_titre")}</h1>
           <p className="connexion-marque__texte">{t("marque_texte")}</p>
@@ -52,25 +42,29 @@ export default function Connexion() {
       </aside>
 
       <div className="connexion-formulaire-zone">
-        <form className="connexion-formulaire" onSubmit={gererConnexion}>
-          <div className="connexion-formulaire__langues">
-            {LANGUES.map((langue) => (
-              <button
-                key={langue.code}
-                type="button"
-                className="langue-bouton"
-                aria-pressed={i18n.language === langue.code}
-                onClick={() => changerLangue(langue.code, langue.dir)}
-              >
-                {langue.nom}
-              </button>
-            ))}
-          </div>
-
-          <h1>{t("connexion_titre")}</h1>
-          <p className="connexion-formulaire__soustitre">{t("connexion_soustitre")}</p>
+        <form className="connexion-formulaire" onSubmit={gererInscription}>
+          <h1>Créer un compte</h1>
+          <p className="connexion-formulaire__soustitre">
+            Compte Super Administrateur (base centrale, environnement de test)
+          </p>
 
           {erreur && <div className="erreur-message">{erreur}</div>}
+          {succes && (
+            <div className="succes-message">
+              Compte créé avec succès — redirection vers la connexion...
+            </div>
+          )}
+
+          <div className="champ">
+            <label htmlFor="nom">Nom complet</label>
+            <input
+              id="nom"
+              type="text"
+              value={nom}
+              onChange={(e) => setNom(e.target.value)}
+              required
+            />
+          </div>
 
           <div className="champ">
             <label htmlFor="email">{t("email")}</label>
@@ -89,20 +83,22 @@ export default function Connexion() {
             <input
               id="mot-de-passe"
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
+              minLength={8}
               value={motDePasse}
               onChange={(e) => setMotDePasse(e.target.value)}
               required
             />
+            <span className="champ__aide">8 caractères minimum</span>
           </div>
 
-          <button className="bouton-principal" type="submit" disabled={enCours}>
-            {enCours ? "..." : t("se_connecter")}
+          <button className="bouton-principal" type="submit" disabled={enCours || succes}>
+            {enCours ? "..." : "Créer le compte"}
           </button>
 
-          <a className="lien-secondaire" href="#">
-            {t("mot_de_passe_oublie")}
-          </a>
+          <Link className="lien-secondaire" to="/">
+            Déjà un compte ? Se connecter
+          </Link>
         </form>
       </div>
     </div>

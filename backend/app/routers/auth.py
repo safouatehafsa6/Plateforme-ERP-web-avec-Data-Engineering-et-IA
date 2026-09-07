@@ -28,6 +28,12 @@ class LoginPayload(BaseModel):
     recaptchaToken: str | None = None
 
 
+class RegisterPayload(BaseModel):
+    nom: str
+    email: str
+    motDePasse: str
+
+
 @router.get("/captcha")
 def obtenir_captcha():
     captcha = generer_captcha()
@@ -35,6 +41,53 @@ def obtenir_captcha():
     if os.getenv("ENV", "dev") != "production":
         print(f"[DEV] Captcha {captcha['id']} -> code: {captcha['code']}")
     return {"captchaId": captcha["id"], "svg": captcha["svg"]}
+
+
+@router.post("/register")
+def register(payload: RegisterPayload):
+    """
+    Création d'un vrai compte Super Administrateur dans la base centrale.
+
+    À ce stade du projet (routage multi-tenant en cours d'implémentation),
+    cette route sert à créer un compte réel de test/démo, à la place du
+    script de seed — pour permettre une inscription et une connexion
+    authentiques plutôt qu'un jeu de données fictif.
+    """
+    email = payload.email.strip().lower()
+    nom = payload.nom.strip()
+
+    if len(payload.motDePasse) < 8:
+        return JSONResponse(status_code=400, content={
+            "message": "Le mot de passe doit contenir au moins 8 caractères.",
+        })
+
+    mot_de_passe_hash = bcrypt.hashpw(
+        payload.motDePasse.encode("utf-8"), bcrypt.gensalt()
+    ).decode("utf-8")
+
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM super_admin WHERE email = %s", (email,))
+            if cur.fetchone():
+                return JSONResponse(status_code=409, content={
+                    "message": "Un compte existe déjà avec cet email.",
+                })
+
+            cur.execute(
+                """
+                INSERT INTO super_admin (nom, email, mot_de_passe)
+                VALUES (%s, %s, %s)
+                RETURNING id;
+                """,
+                (nom, email, mot_de_passe_hash),
+            )
+            nouvel_id = cur.fetchone()[0]
+        conn.commit()
+    finally:
+        pool_central.putconn(conn)
+
+    return {"id": nouvel_id, "nom": nom, "email": email}
 
 
 @router.post("/login")
@@ -70,10 +123,6 @@ async def login(payload: LoginPayload):
                 })
 
     # --- Couche 3 : vérification réelle des identifiants ---
-    # NOTE : démo de sécurité sur la table super_admin de la base centrale.
-    # Le routage complet vers les bases entreprise (utilisateur métier) est
-    # en cours d'implémentation en parallèle (diagramme de séquence
-    # "Routage multi-tenant").
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:

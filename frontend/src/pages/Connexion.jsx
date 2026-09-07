@@ -1,36 +1,38 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
-import ReCAPTCHA from "react-google-recaptcha";
+import { useNavigate, Link } from "react-router-dom";
 import { apiPost } from "../api/config";
 import ReseauDecoratif from "../components/ReseauDecoratif";
-import CaptchaLocal from "../components/CaptchaLocal";
-
-// Clé de TEST officielle de Google reCAPTCHA v2 (case à cocher) : elle
-// valide toujours la vérification, pratique en développement. Avant la
-// mise en production, remplacez-la par votre propre clé de site, obtenue
-// gratuitement sur https://www.google.com/recaptcha/admin
-const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY
-  || "6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI";
 
 export default function Connexion() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const captchaRef = useRef(null);
-  const recaptchaRef = useRef(null);
 
   const [email, setEmail] = useState("");
   const [motDePasse, setMotDePasse] = useState("");
-  const [captchaValeur, setCaptchaValeur] = useState("");
-  const [recaptchaToken, setRecaptchaToken] = useState(null);
   const [erreur, setErreur] = useState("");
   const [enCours, setEnCours] = useState(false);
 
-  // Ces deux indicateurs viennent du BACKEND, jamais calculés seul côté
-  // client : c'est le serveur qui décide, selon le nombre d'échecs réels
-  // pour cet email, si le captcha / reCAPTCHA doivent être affichés.
-  const [afficherCaptcha, setAfficherCaptcha] = useState(false);
-  const [afficherRecaptcha, setAfficherRecaptcha] = useState(false);
+  // Sécurité progressive mise en place par la binôme : après 2 échecs,
+  // un captcha local (image SVG) est exigé ; après 4 échecs, un
+  // reCAPTCHA est en plus requis.
+  const [captchaRequis, setCaptchaRequis] = useState(false);
+  const [captchaSvg, setCaptchaSvg] = useState("");
+  const [captchaId, setCaptchaId] = useState("");
+  const [captchaValeur, setCaptchaValeur] = useState("");
+  const [recaptchaRequis, setRecaptchaRequis] = useState(false);
+
+  async function chargerCaptcha() {
+    const data = await apiPost("/auth/captcha", {}).catch(() => null);
+    // La route captcha est en GET côté backend ; on utilise fetch direct
+    // ici pour rester fidèle à sa définition (@router.get("/captcha")).
+    const res = await fetch(
+      `${import.meta.env.VITE_API_URL || "http://localhost:8000/api"}/auth/captcha`
+    );
+    const json = await res.json();
+    setCaptchaSvg(json.svg);
+    setCaptchaId(json.captchaId);
+  }
 
   async function gererConnexion(e) {
     e.preventDefault();
@@ -38,33 +40,24 @@ export default function Connexion() {
     setEnCours(true);
 
     try {
-      const corps = { email, motDePasse };
-      if (afficherCaptcha) {
-        corps.captchaId = captchaRef.current?.captchaId;
-        corps.captchaValeur = captchaValeur;
-      }
-      if (afficherRecaptcha) {
-        corps.recaptchaToken = recaptchaToken;
-      }
-
-      const data = await apiPost("/auth/login", corps);
+      const data = await apiPost("/auth/login", {
+        email,
+        motDePasse,
+        captchaId: captchaRequis ? captchaId : undefined,
+        captchaValeur: captchaRequis ? captchaValeur : undefined,
+      });
       localStorage.setItem("token", data.token);
       navigate("/dashboard");
     } catch (err) {
-      const infos = err.data || {};
-      setErreur(infos.message || t("erreur_identifiants"));
+      const info = err.data || {};
+      setErreur(info.message || "Une erreur est survenue.");
 
-      if (infos.requiresCaptcha) {
-        setAfficherCaptcha(true);
-        // Renouvellement automatique du captcha après chaque tentative,
-        // qu'elle ait échoué à cause du mot de passe ou du code lui-même.
-        captchaRef.current?.rafraichir();
-        setCaptchaValeur("");
+      if (info.requiresCaptcha) {
+        setCaptchaRequis(true);
+        await chargerCaptcha();
       }
-      if (infos.requiresRecaptcha) {
-        setAfficherRecaptcha(true);
-        recaptchaRef.current?.reset();
-        setRecaptchaToken(null);
+      if (info.requiresRecaptcha) {
+        setRecaptchaRequis(true);
       }
     } finally {
       setEnCours(false);
@@ -113,18 +106,27 @@ export default function Connexion() {
             />
           </div>
 
-          {afficherCaptcha && (
-            <CaptchaLocal ref={captchaRef} valeur={captchaValeur} onChangeValeur={setCaptchaValeur} />
+          {captchaRequis && (
+            <div className="champ">
+              <label htmlFor="captcha">Code de sécurité</label>
+              <div
+                className="captcha-svg"
+                dangerouslySetInnerHTML={{ __html: captchaSvg }}
+              />
+              <input
+                id="captcha"
+                type="text"
+                value={captchaValeur}
+                onChange={(e) => setCaptchaValeur(e.target.value)}
+                required
+              />
+            </div>
           )}
 
-          {afficherRecaptcha && (
-            <div className="champ">
-              <ReCAPTCHA
-                ref={recaptchaRef}
-                sitekey={RECAPTCHA_SITE_KEY}
-                onChange={(token) => setRecaptchaToken(token)}
-                hl={i18nCodeVersLangueGoogle()}
-              />
+          {recaptchaRequis && (
+            <div className="app-page-note">
+              Trop de tentatives échouées — vérification reCAPTCHA
+              supplémentaire requise (à intégrer avec la clé du site).
             </div>
           )}
 
@@ -132,16 +134,11 @@ export default function Connexion() {
             {enCours ? "..." : t("se_connecter")}
           </button>
 
-          <a className="lien-secondaire" href="#">
-            {t("mot_de_passe_oublie")}
-          </a>
+          <Link className="lien-secondaire" to="/inscription">
+            Pas encore de compte ? S'inscrire
+          </Link>
         </form>
       </div>
     </div>
   );
-}
-
-function i18nCodeVersLangueGoogle() {
-  const lang = document.documentElement.lang;
-  return lang === "ar" ? "ar" : lang === "en" ? "en" : "fr";
 }

@@ -4,17 +4,50 @@
 @import "@fontsource/inter/500.css";
 @import "@fontsource/inter/600.css";
 
-:root {
+:root,
+[data-theme="clair"] {
   --ink: #0e2233;
   --ink-soft: #16324a;
   --paper: #f7f5f1;
   --paper-line: #e4dfd6;
+  --carte-fond: #ffffff;
   --brass: #c68a3d;
   --brass-dark: #a9702b;
   --teal: #4c7a79;
   --text-dark: #142430;
   --text-muted: #5b6b74;
   --danger: #b3432f;
+  --texte-sur-sombre: #f5f3ef;
+}
+
+[data-theme="sombre"] {
+  --ink: #0a1520;
+  --ink-soft: #101f2e;
+  --paper: #0f1a24;
+  --paper-line: #263441;
+  --carte-fond: #16232f;
+  --brass: #d79a4d;
+  --brass-dark: #c68a3d;
+  --teal: #6fa19e;
+  --text-dark: #edf1f4;
+  --text-muted: #93a3af;
+  --danger: #e07a63;
+  --texte-sur-sombre: #f5f3ef;
+}
+
+[data-theme="professionnel"] {
+  --ink: #101828;
+  --ink-soft: #182235;
+  --paper: #f4f6f9;
+  --paper-line: #dbe1ea;
+  --carte-fond: #ffffff;
+  --brass: #2563eb;
+  --brass-dark: #1d4ed8;
+  --teal: #0f766e;
+  --text-dark: #101828;
+  --text-muted: #5b6675;
+  --danger: #dc2626;
+  --texte-sur-sombre: #f5f3ef;
 }
 
 * {
@@ -54,7 +87,7 @@ a {
   grid-template-columns: 1fr 1fr;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 768px) {
   .connexion-layout {
     grid-template-columns: 1fr;
   }
@@ -63,9 +96,18 @@ a {
   }
 }
 
+@media (max-width: 480px) {
+  .connexion-formulaire-zone {
+    padding: 1.25rem;
+  }
+  .connexion-formulaire h1 {
+    font-size: 1.6rem;
+  }
+}
+
 .connexion-marque {
   background: linear-gradient(160deg, var(--ink) 0%, var(--ink-soft) 100%);
-  color: var(--paper);
+  color: var(--texte-sur-sombre);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -144,7 +186,7 @@ a {
 
 .langue-bouton[aria-pressed="true"] {
   background: var(--ink);
-  color: var(--paper);
+  color: var(--texte-sur-sombre);
   border-color: var(--ink);
 }
 
@@ -180,7 +222,7 @@ a {
   border: 1px solid var(--paper-line);
   border-radius: 6px;
   font-size: 0.96rem;
-  background: #fff;
+  background: var(--carte-fond);
   color: var(--text-dark);
 }
 
@@ -259,7 +301,7 @@ a {
 
 .captcha-refresh {
   border: 1px solid var(--paper-line);
-  background: #fff;
+  background: var(--carte-fond);
   border-radius: 6px;
   width: 36px;
   height: 36px;
@@ -285,7 +327,163 @@ a {
   to { transform: rotate(360deg); }
 }
 
+/* ---- Inscription (parcours en plusieurs étapes) ---- */
+
+.inscription-layout {
+  min-height: 100vh;
+  padding-top: 64px;
+  display: flex;
+  justify-content: center;
+  padding-left: 1.5rem;
+  padding-right: 1.5rem;
+  background: var(--paper);
+}
+
+.inscription-carte {
+  width: 100%;
+  max-width: 30rem;
+  padding: 2.5rem 0;
+}
+
+.etapes-indicateur {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2.2rem;
+}
+
+.etape-puce {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1;
+  position: relative;
+}
+
+.etape-puce__rond {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1.5px solid var(--paper-line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--carte-fond);
+}
+
+.etape-puce__nom {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .etape-puce__nom {
+    display: none;
+  }
+  .inscription-carte {
+    padding: 1.75rem 0;
+  }
+  .inscription-layout {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  .champ-ligne {
+    flex-direction: column;
+    gap: 0;
+  }
+}
+
+.etape-puce--active .etape-puce__rond {
+  border-color: var(--brass);
+  color: var(--brass);
+}
+
+.etape-puce--active .etape-puce__nom {
+  color: var(--text-dark);
+  font-weight: 500;
+}
+
+.etape-puce--faite .etape-puce__rond {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: #fff;
+}
+
+.champ-ligne {
+  display: flex;
+  gap: 0.8rem;
+}
+
+.champ-ligne .champ {
+  flex: 1;
+}
+
+.plans-grille {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+}
+
+.plan-carte {
+  text-align: left;
+  border: 1px solid var(--paper-line);
+  background: var(--carte-fond);
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  cursor: pointer;
+}
+
+.plan-carte:hover {
+  border-color: var(--brass);
+}
+
+.plan-carte__nom {
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.plan-carte__prix {
+  font-family: "Fraunces", serif;
+  font-size: 1.2rem;
+  color: var(--brass);
+  margin-top: 0.2rem;
+}
+
+.plan-carte__duree {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-top: 0.1rem;
+}
+
+.plan-carte__avantage {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0.5rem 0 0;
+}
+
+.confirmation-finale {
+  text-align: center;
+}
+
+.confirmation-finale__icone {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--teal);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.2rem;
+}
+
 /* ---- Header fixe global ---- */
+/* Points de rupture : Mobile <=480px | Tablette 481-768px | Desktop 769-1024px | Wide >=1280px */
 
 .app-header {
   position: fixed;
@@ -299,8 +497,14 @@ a {
   justify-content: space-between;
   padding: 0 1.75rem;
   background: rgba(14, 34, 51, 0.97);
-  color: var(--paper);
+  color: var(--texte-sur-sombre);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0 1rem;
+  }
 }
 
 .app-header__gauche {
@@ -313,20 +517,20 @@ a {
   font-family: "Fraunces", serif;
   font-weight: 600;
   font-size: 1.05rem;
-  color: var(--paper);
+  color: var(--texte-sur-sombre);
   text-decoration: none;
   white-space: nowrap;
+}
+
+@media (max-width: 480px) {
+  .app-header__logo {
+    font-size: 0.92rem;
+  }
 }
 
 .app-header__nav {
   display: flex;
   gap: 1.5rem;
-}
-
-@media (max-width: 780px) {
-  .app-header__nav {
-    display: none;
-  }
 }
 
 .app-header__lien {
@@ -343,6 +547,96 @@ a {
   display: flex;
   align-items: center;
   gap: 1.25rem;
+}
+
+.app-header__hamburger {
+  display: none;
+}
+
+/* Desktop (>=769px) : nav + langues + thèmes + actions visibles en ligne */
+@media (min-width: 769px) {
+  .app-header__droite--desktop {
+    display: flex !important;
+  }
+  .app-header__hamburger,
+  .app-header__menu-mobile {
+    display: none;
+  }
+}
+
+/* Mobile + Tablette (<=768px) : on cache la nav et les actions du header
+   desktop, remplacées par le hamburger + panneau déroulant */
+@media (max-width: 768px) {
+  .app-header__nav--desktop {
+    display: none;
+  }
+  .app-header__droite--desktop {
+    display: none;
+  }
+  .app-header__hamburger {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--texte-sur-sombre);
+    cursor: pointer;
+    padding: 0.3rem;
+  }
+  .app-header__menu-mobile {
+    position: fixed;
+    top: 64px;
+    left: 0;
+    right: 0;
+    background: var(--ink);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 1rem 1.25rem 1.4rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    z-index: 99;
+    max-height: calc(100vh - 64px);
+    overflow-y: auto;
+  }
+  .app-header__nav-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .app-header__actions--mobile {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .app-header__actions--mobile .app-header__bouton {
+    text-align: center;
+  }
+}
+
+.app-header__themes {
+  display: flex;
+  gap: 0.25rem;
+  border-inline-end: 1px solid rgba(255, 255, 255, 0.18);
+  padding-inline-end: 0.7rem;
+  margin-inline-end: 0.2rem;
+}
+
+.theme-bouton {
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: transparent;
+  color: #cfe0dd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.theme-bouton[aria-pressed="true"] {
+  background: var(--brass);
+  border-color: var(--brass);
+  color: #fff;
 }
 
 .app-header__langues {
@@ -378,7 +672,7 @@ a {
 }
 
 .app-header__bouton--secondaire {
-  color: var(--paper);
+  color: var(--texte-sur-sombre);
   border: 1px solid rgba(255, 255, 255, 0.3);
 }
 
@@ -420,7 +714,7 @@ a {
   grid-template-columns: 240px 1fr;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 768px) {
   .app-layout {
     grid-template-columns: 1fr;
   }
@@ -431,7 +725,7 @@ a {
 
 .app-sidebar {
   background: var(--ink);
-  color: var(--paper);
+  color: var(--texte-sur-sombre);
   display: flex;
   flex-direction: column;
   padding: 1.5rem 1rem;
@@ -492,7 +786,7 @@ a {
   justify-content: space-between;
   padding: 1rem 1.75rem;
   border-bottom: 1px solid var(--paper-line);
-  background: #fff;
+  background: var(--carte-fond);
 }
 
 .app-topbar__recherche {
@@ -557,14 +851,31 @@ a {
   margin-bottom: 1.75rem;
 }
 
-@media (max-width: 700px) {
+/* Tablette (481-768px) : 2 colonnes */
+@media (max-width: 768px) {
   .kpi-grille {
     grid-template-columns: 1fr 1fr;
   }
 }
 
+/* Mobile (<=480px) : 1 colonne, plus lisible que 2 sur petit écran */
+@media (max-width: 480px) {
+  .kpi-grille {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Wide Desktop (>=1280px) : on limite la largeur du contenu pour éviter
+   des lignes trop étirées et illisibles */
+@media (min-width: 1280px) {
+  .app-main {
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+}
+
 .kpi-carte {
-  background: #fff;
+  background: var(--carte-fond);
   border: 1px solid var(--paper-line);
   border-radius: 8px;
   padding: 1.1rem 1.25rem;
@@ -603,4 +914,47 @@ a {
   text-align: center;
   color: var(--text-muted);
   font-size: 0.9rem;
+}
+
+/* ---- Indicateur de force du mot de passe ---- */
+.force-mdp {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+}
+
+.force-mdp__barres {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+}
+
+.force-mdp__barre {
+  height: 4px;
+  flex: 1;
+  border-radius: 2px;
+  background: var(--paper-line, #e2e2e2);
+  transition: background-color 0.2s ease;
+}
+
+.force-mdp__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ---- Case d'acceptation des CGU ---- */
+.case-cgu {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.case-cgu input[type="checkbox"] {
+  margin-top: 0.15rem;
+  flex-shrink: 0;
 }

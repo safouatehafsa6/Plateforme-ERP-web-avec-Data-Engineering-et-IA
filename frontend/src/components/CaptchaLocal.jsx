@@ -2,11 +2,17 @@ import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import { RotateCw } from "lucide-react";
 import { apiGet } from "../api/config";
 
-// Le SVG et la réponse attendue sont générés côté SERVEUR (voir
-// backend/src/utils/genererCaptcha.js) : le frontend ne fait qu'afficher
-// l'image et transmettre la valeur saisie, il ne connaît jamais la
-// réponse correcte.
-const CaptchaLocal = forwardRef(function CaptchaLocal({ valeur, onChangeValeur }, ref) {
+// Le SVG et la réponse attendue sont générés côté SERVEUR : le frontend
+// ne fait qu'afficher l'image et transmettre la valeur saisie, il ne
+// connaît jamais la réponse correcte.
+//
+// `endpoint` permet de réutiliser ce composant sur plusieurs formulaires
+// (connexion, inscription...), chacun avec son propre point d'accès
+// captcha côté backend.
+const CaptchaLocal = forwardRef(function CaptchaLocal(
+  { valeur, onChangeValeur, endpoint = "/auth/captcha" },
+  ref
+) {
   const [captchaId, setCaptchaId] = useState(null);
   const [svg, setSvg] = useState("");
   const [chargement, setChargement] = useState(false);
@@ -14,7 +20,7 @@ const CaptchaLocal = forwardRef(function CaptchaLocal({ valeur, onChangeValeur }
   async function rafraichir() {
     setChargement(true);
     try {
-      const data = await apiGet("/auth/captcha");
+      const data = await apiGet(endpoint);
       setCaptchaId(data.captchaId);
       setSvg(data.svg);
       onChangeValeur("");
@@ -25,10 +31,9 @@ const CaptchaLocal = forwardRef(function CaptchaLocal({ valeur, onChangeValeur }
 
   useEffect(() => {
     rafraichir();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint]);
 
-  // Permet au composant parent (Connexion) de lire le captchaId actuel
-  // et de forcer un renouvellement après chaque tentative échouée.
   useImperativeHandle(ref, () => ({
     captchaId,
     rafraichir,

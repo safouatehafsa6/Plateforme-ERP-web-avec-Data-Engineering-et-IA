@@ -11,16 +11,28 @@ CREATE TABLE super_admin (
 
 CREATE TABLE entreprise (
     id                  SERIAL PRIMARY KEY,
-    nom                 VARCHAR(150) NOT NULL,
-    secteur             VARCHAR(100),
-    identifiant_unique  VARCHAR(50) UNIQUE NOT NULL,      -- ex: 147258K
-    nom_base            VARCHAR(100) UNIQUE NOT NULL,     -- ex: societe_alpha
-    statut              VARCHAR(30) NOT NULL DEFAULT 'inscrite',
-        -- valeurs possibles : inscrite, otp_valide, kyc_en_attente, kyc_valide,
-        -- kyc_rejete, essai, attente_paiement, active, suspendue, resiliee, expiree
+    type_compte         VARCHAR(20) NOT NULL DEFAULT 'entreprise',
+        -- valeurs possibles : personne_physique, entreprise
+    nom                 VARCHAR(150) NOT NULL,       -- nom complet (physique) ou raison sociale (entreprise)
+    secteur             VARCHAR(100),                -- non utilise pour une personne physique
+    identifiant_unique  VARCHAR(50) UNIQUE NOT NULL, -- ex: 147258K
+    nom_base            VARCHAR(100) UNIQUE NOT NULL,-- ex: societe_alpha
+    statut              VARCHAR(20) NOT NULL DEFAULT 'en_attente',
+        -- 4 statuts officiels : en_attente, valide, actif, refuse
     email_contact       VARCHAR(150) NOT NULL,
     telephone_contact    VARCHAR(30),
     date_creation       TIMESTAMP DEFAULT NOW()
+);
+
+-- Documents KYC soumis, adaptes selon le type de compte :
+-- personne_physique -> 1 document (cin)
+-- entreprise -> 3 documents (cin_gerant, patente, extrait_rne)
+CREATE TABLE document_kyc (
+    id              SERIAL PRIMARY KEY,
+    entreprise_id   INTEGER NOT NULL REFERENCES entreprise(id) ON DELETE CASCADE,
+    type_document   VARCHAR(30) NOT NULL, -- cin, cin_gerant, patente, extrait_rne
+    nom_fichier     VARCHAR(255) NOT NULL,
+    date_soumission TIMESTAMP DEFAULT NOW()
 );
 
 CREATE TABLE abonnement (

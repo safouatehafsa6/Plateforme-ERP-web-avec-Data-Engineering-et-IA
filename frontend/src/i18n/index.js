@@ -111,6 +111,8 @@ const resources = {
       aide_pas_de_copier_coller: "Veuillez ressaisir l'adresse (le copier-coller est désactivé).",
       label_confirmation_mot_de_passe: "Confirmation du mot de passe",
       texte_acceptation_cgu: "J'ai pris connaissance des conditions d'utilisation de la plateforme et je les accepte.",
+      label_numero_fiscal: "Numéro d'identification fiscale",
+      label_numero_cin: "Numéro de carte d'identité nationale",
     },
   },
   en: {
@@ -215,6 +217,8 @@ const resources = {
       aide_pas_de_copier_coller: "Please retype the address (pasting is disabled).",
       label_confirmation_mot_de_passe: "Confirm password",
       texte_acceptation_cgu: "I have read and accept the platform's terms of use.",
+      label_numero_fiscal: "Tax identification number",
+      label_numero_cin: "National ID card number",
     },
   },
   ar: {
@@ -319,6 +323,8 @@ const resources = {
       aide_pas_de_copier_coller: "يرجى إعادة كتابة العنوان (اللصق معطل).",
       label_confirmation_mot_de_passe: "تأكيد كلمة المرور",
       texte_acceptation_cgu: "لقد اطلعت على شروط استخدام المنصة وأوافق عليها.",
+      label_numero_fiscal: "الرقم الضريبي",
+      label_numero_cin: "رقم بطاقة التعريف الوطنية",
     },
   },
 };

@@ -67,6 +67,12 @@ def _erreurs_validation_inscription(payload: "InscriptionPayload") -> list[str]:
     if payload.typeCompte == "entreprise" and not (payload.nomEntreprise or "").strip():
         erreurs.append("Le nom de l'entreprise est obligatoire pour ce type de compte.")
 
+    if payload.typeCompte == "entreprise" and not (payload.numeroFiscal or "").strip():
+        erreurs.append("Le numéro d'identification fiscale est obligatoire pour ce type de compte.")
+
+    if not (payload.numeroCin or "").strip():
+        erreurs.append("Le numéro de carte d'identité nationale est obligatoire.")
+
     if not (payload.nomAdmin or "").strip():
         erreurs.append("Le nom complet est obligatoire.")
 
@@ -104,6 +110,8 @@ class InscriptionPayload(BaseModel):
     typeCompte: str  # "personne_physique" | "entreprise"
     nomEntreprise: str | None = None   # requis si entreprise
     secteur: str | None = None
+    numeroFiscal: str | None = None    # requis si entreprise
+    numeroCin: str                      # requis dans tous les cas
     nomAdmin: str                       # nom complet (personne physique) ou nom du représentant (entreprise)
     email: str
     emailConfirmation: str
@@ -140,8 +148,8 @@ def inscription(payload: InscriptionPayload):
 
     email = payload.email.strip().lower()
 
-    # Anti-doublon (section 10) : un email ne peut être utilisé que pour
-    # une seule inscription.
+    # Anti-doublon (section 10) : email, téléphone et numéro fiscal ne
+    # peuvent chacun être utilisés que pour une seule inscription.
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
@@ -150,6 +158,20 @@ def inscription(payload: InscriptionPayload):
                 return JSONResponse(status_code=409, content={
                     "message": "Une inscription existe déjà avec cette adresse email.",
                 })
+
+            if payload.telephone:
+                cur.execute("SELECT id FROM entreprise WHERE telephone_contact = %s", (payload.telephone,))
+                if cur.fetchone():
+                    return JSONResponse(status_code=409, content={
+                        "message": "Une inscription existe déjà avec ce numéro de téléphone.",
+                    })
+
+            if payload.typeCompte == "entreprise" and payload.numeroFiscal:
+                cur.execute("SELECT id FROM entreprise WHERE numero_fiscal = %s", (payload.numeroFiscal,))
+                if cur.fetchone():
+                    return JSONResponse(status_code=409, content={
+                        "message": "Une inscription existe déjà avec ce numéro d'identification fiscale.",
+                    })
     finally:
         pool_central.putconn(conn)
 
@@ -165,13 +187,14 @@ def inscription(payload: InscriptionPayload):
         with conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO entreprise
-                   (type_compte, nom, secteur, identifiant_unique, nom_base, statut,
+                   (type_compte, nom, secteur, numero_fiscal, numero_cin, identifiant_unique, nom_base, statut,
                     email_contact, telephone_contact, cgu_accepte_le, cgu_version)
-                   VALUES (%s, %s, %s, %s, %s, 'en_attente', %s, %s, %s, %s)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, 'en_attente', %s, %s, %s, %s)
                    RETURNING id""",
                 (
-                    payload.typeCompte, nom_enregistre, secteur, identifiant_unique, nom_base,
-                    email, payload.telephone, datetime.now(timezone.utc), CGU_VERSION_ACTUELLE,
+                    payload.typeCompte, nom_enregistre, secteur, payload.numeroFiscal, payload.numeroCin,
+                    identifiant_unique, nom_base, email, payload.telephone,
+                    datetime.now(timezone.utc), CGU_VERSION_ACTUELLE,
                 ),
             )
             entreprise_id = cur.fetchone()[0]

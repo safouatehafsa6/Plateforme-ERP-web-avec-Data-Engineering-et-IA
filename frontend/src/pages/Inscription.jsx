@@ -30,7 +30,7 @@ export default function Inscription() {
   const [nomBaseFinal, setNomBaseFinal] = useState("");
 
   const [form, setForm] = useState({
-    nomEntreprise: "", secteur: "", nomAdmin: "",
+    nomEntreprise: "", secteur: "", numeroFiscal: "", numeroCin: "", nomAdmin: "",
     email: "", emailConfirmation: "",
     telephone: "",
     motDePasse: "", motDePasseConfirmation: "",
@@ -87,6 +87,12 @@ export default function Inscription() {
     }
     if (!cguAccepte) {
       return "Vous devez accepter les conditions d'utilisation pour continuer.";
+    }
+    if (typeCompte === "entreprise" && !form.numeroFiscal.trim()) {
+      return "Le numéro d'identification fiscale est obligatoire.";
+    }
+    if (!form.numeroCin.trim()) {
+      return "Le numéro de carte d'identité nationale est obligatoire.";
     }
     return null;
   }
@@ -248,11 +254,19 @@ export default function Inscription() {
                   <label>{t("label_secteur")}</label>
                   <input value={form.secteur} onChange={(e) => majForm("secteur", e.target.value)} placeholder={t("secteur_placeholder")} />
                 </div>
+                <div className="champ">
+                  <label>{t("label_numero_fiscal")}</label>
+                  <input value={form.numeroFiscal} onChange={(e) => majForm("numeroFiscal", e.target.value)} required />
+                </div>
               </>
             )}
             <div className="champ">
               <label>{typeCompte === "entreprise" ? t("label_nom_representant") : t("label_nom_complet")}</label>
               <input value={form.nomAdmin} onChange={(e) => majForm("nomAdmin", e.target.value)} required />
+            </div>
+            <div className="champ">
+              <label>{t("label_numero_cin")}</label>
+              <input value={form.numeroCin} onChange={(e) => majForm("numeroCin", e.target.value)} required />
             </div>
 
             <div className="champ">

@@ -4,6 +4,7 @@ import { ThemeProvider } from "./context/ThemeContext";
 import Header from "./components/Header";
 import Connexion from "./pages/Connexion";
 import Inscription from "./pages/Inscription";
+import MotDePasseOublie from "./pages/MotDePasseOublie";
 import TableauDeBord from "./pages/TableauDeBord";
 
 // Le Header est rendu une seule fois ici, en dehors des <Routes> :
@@ -18,6 +19,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Connexion />} />
             <Route path="/inscription" element={<Inscription />} />
+            <Route path="/mot-de-passe-oublie" element={<MotDePasseOublie />} />
             <Route path="/dashboard" element={<TableauDeBord />} />
           </Routes>
         </LangueProvider>

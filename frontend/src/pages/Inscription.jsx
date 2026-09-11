@@ -5,6 +5,7 @@ import { Check, User, Building2 } from "lucide-react";
 import { apiPost } from "../api/config";
 import CaptchaLocal from "../components/CaptchaLocal";
 import IndicateurForceMotDePasse from "../components/IndicateurForceMotDePasse";
+import ChampMotDePasse from "../components/ChampMotDePasse";
 
 const DOCUMENTS_PAR_TYPE = {
   personne_physique: [{ id: "cin", labelKey: "doc_cin" }],
@@ -292,8 +293,7 @@ export default function Inscription() {
 
             <div className="champ">
               <label>{t("mot_de_passe")}</label>
-              <input
-                type="password"
+              <ChampMotDePasse
                 value={form.motDePasse}
                 onChange={(e) => majForm("motDePasse", e.target.value)}
                 required
@@ -303,8 +303,7 @@ export default function Inscription() {
             </div>
             <div className="champ">
               <label>{t("label_confirmation_mot_de_passe")}</label>
-              <input
-                type="password"
+              <ChampMotDePasse
                 value={form.motDePasseConfirmation}
                 onChange={(e) => majForm("motDePasseConfirmation", e.target.value)}
                 onPaste={(e) => e.preventDefault()}

@@ -1,15 +1,12 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import ReCAPTCHA from "react-google-recaptcha";
 import { apiPost } from "../api/config";
 import ReseauDecoratif from "../components/ReseauDecoratif";
 import CaptchaLocal from "../components/CaptchaLocal";
+import ChampMotDePasse from "../components/ChampMotDePasse";
 
-// Clé de TEST officielle de Google reCAPTCHA v2 (case à cocher) : elle
-// valide toujours la vérification, pratique en développement. Avant la
-// mise en production, remplacez-la par votre propre clé de site, obtenue
-// gratuitement sur https://www.google.com/recaptcha/admin
 const RECAPTCHA_SITE_KEY = import.meta.env.VITE_RECAPTCHA_SITE_KEY
   || "6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI";
 
@@ -26,9 +23,6 @@ export default function Connexion() {
   const [erreur, setErreur] = useState("");
   const [enCours, setEnCours] = useState(false);
 
-  // Ces deux indicateurs viennent du BACKEND, jamais calculés seul côté
-  // client : c'est le serveur qui décide, selon le nombre d'échecs réels
-  // pour cet email, si le captcha / reCAPTCHA doivent être affichés.
   const [afficherCaptcha, setAfficherCaptcha] = useState(false);
   const [afficherRecaptcha, setAfficherRecaptcha] = useState(false);
 
@@ -56,8 +50,6 @@ export default function Connexion() {
 
       if (infos.requiresCaptcha) {
         setAfficherCaptcha(true);
-        // Renouvellement automatique du captcha après chaque tentative,
-        // qu'elle ait échoué à cause du mot de passe ou du code lui-même.
         captchaRef.current?.rafraichir();
         setCaptchaValeur("");
       }
@@ -103,9 +95,8 @@ export default function Connexion() {
 
           <div className="champ">
             <label htmlFor="mot-de-passe">{t("mot_de_passe")}</label>
-            <input
+            <ChampMotDePasse
               id="mot-de-passe"
-              type="password"
               autoComplete="current-password"
               value={motDePasse}
               onChange={(e) => setMotDePasse(e.target.value)}
@@ -132,9 +123,9 @@ export default function Connexion() {
             {enCours ? "..." : t("se_connecter")}
           </button>
 
-          <a className="lien-secondaire" href="#">
+          <Link className="lien-secondaire" to="/mot-de-passe-oublie">
             {t("mot_de_passe_oublie")}
-          </a>
+          </Link>
         </form>
       </div>
     </div>

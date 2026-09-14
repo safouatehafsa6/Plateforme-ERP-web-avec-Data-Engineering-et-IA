@@ -101,6 +101,61 @@ def _chercher_utilisateur_entreprise(nom_base: str, email: str):
         pool_tenant.putconn(conn)
 
 
+def _verifier_et_incrementer_essai(entreprise_id: int) -> dict | None:
+    """
+    Gère la limite de 30 connexions pour un abonnement de type Essai.
+
+    Retourne None si l'entreprise n'a pas d'abonnement de type Essai actif
+    (rien à faire dans ce cas — plan payant, pas de limite).
+
+    Sinon, incrémente le compteur de visites et retourne un dictionnaire
+    avec le nombre de visites utilisées/restantes, et si l'accès doit être
+    bloqué (limite déjà atteinte AVANT cette connexion).
+    """
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, visites_utilisees, visites_max FROM abonnement
+                WHERE entreprise_id = %s AND type_plan ILIKE 'essai' AND statut = 'actif'
+                ORDER BY id DESC LIMIT 1
+                """,
+                (entreprise_id,),
+            )
+            ligne = cur.fetchone()
+
+            if not ligne or ligne[2] is None:
+                return None  # pas d'essai actif avec limite définie
+
+            abonnement_id, visites_utilisees, visites_max = ligne
+
+            if visites_utilisees >= visites_max:
+                # Limite déjà atteinte : on bloque SANS incrémenter davantage.
+                return {
+                    "bloque": True,
+                    "visites_utilisees": visites_utilisees,
+                    "visites_restantes": 0,
+                    "visites_max": visites_max,
+                }
+
+            nouvelles_visites = visites_utilisees + 1
+            cur.execute(
+                "UPDATE abonnement SET visites_utilisees = %s WHERE id = %s",
+                (nouvelles_visites, abonnement_id),
+            )
+        conn.commit()
+    finally:
+        pool_central.putconn(conn)
+
+    return {
+        "bloque": False,
+        "visites_utilisees": nouvelles_visites,
+        "visites_restantes": max(visites_max - nouvelles_visites, 0),
+        "visites_max": visites_max,
+    }
+
+
 @router.post("/login")
 async def login(payload: LoginPayload):
     email = payload.email.strip().lower()
@@ -187,6 +242,21 @@ async def login(payload: LoginPayload):
 
     reinitialiser_tentatives(email)
 
+    # --- Gestion de la période d'essai gratuite (30 connexions max) ---
+    # S'applique uniquement aux comptes entreprise (jamais aux Super
+    # Administrateurs SaaS, qui n'ont pas d'abonnement).
+    info_essai = _verifier_et_incrementer_essai(entreprise_id)
+    if info_essai and info_essai.get("bloque"):
+        return JSONResponse(status_code=403, content={
+            "message": (
+                "Votre période d'essai gratuite est terminée (30 connexions "
+                "utilisées). Souscrivez un abonnement pour continuer à "
+                "utiliser la plateforme. Vos données restent conservées et "
+                "exportables à tout moment."
+            ),
+            "essaiExpire": True,
+        })
+
     expiration = datetime.now(timezone.utc) + timedelta(hours=8)
     token = jwt.encode(
         {
@@ -197,13 +267,20 @@ async def login(payload: LoginPayload):
         algorithm="HS256",
     )
 
-    return {
+    reponse = {
         "token": token,
         "utilisateur": {
             "id": utilisateur_id, "nom": f"{prenom} {nom}".strip(),
             "email": email_bd, "role": role_nom or "utilisateur",
         },
     }
+    if info_essai:
+        reponse["essai"] = {
+            "visitesUtilisees": info_essai["visites_utilisees"],
+            "visitesRestantes": info_essai["visites_restantes"],
+            "visitesMax": info_essai["visites_max"],
+        }
+    return reponse
 
 
 # ===========================================================================

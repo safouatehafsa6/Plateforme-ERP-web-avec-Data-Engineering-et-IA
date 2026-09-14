@@ -1006,3 +1006,80 @@ a {
   font-size: 0.88rem;
   margin-bottom: 1rem;
 }
+
+/* ---- Bandeau d'information période d'essai ---- */
+.bandeau-essai {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: #fff8e6;
+  border: 1px solid #f0d896;
+  color: #7a5b12;
+  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  font-size: 0.88rem;
+  margin-bottom: 1.25rem;
+}
+
+/* ---- Avertissement critique (essai bientôt expiré) ---- */
+.bandeau-essai--critique {
+  align-items: flex-start;
+  background: #fdeeee;
+  border-color: #f0b8b8;
+  color: #8a2b2b;
+  flex-direction: row;
+  gap: 0.8rem;
+}
+
+.bandeau-essai--critique__contenu p {
+  margin: 0 0 0.8rem 0;
+}
+
+.bandeau-essai--critique__actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.bandeau-essai--critique__actions .bouton-principal {
+  width: auto;
+  padding: 0.55rem 1.1rem;
+  text-decoration: none;
+  display: inline-block;
+}
+
+/* ---- Bouton secondaire large (export de données) ---- */
+.bouton-secondaire-large {
+  display: inline-block;
+  padding: 0.55rem 1.1rem;
+  border: 1.5px solid var(--color-primary, #1F4A4D);
+  color: var(--color-primary, #1F4A4D);
+  border-radius: 6px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-decoration: none;
+  text-align: center;
+}
+
+.bouton-secondaire-large:hover {
+  background: rgba(31, 74, 77, 0.06);
+}
+
+/* ---- Bloc compte désactivé (page de connexion) ---- */
+.bloc-compte-desactive {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 8px;
+  background: #fdeeee;
+  border: 1px solid #f0b8b8;
+}
+
+.bloc-compte-desactive p {
+  margin: 0 0 0.8rem 0;
+  font-size: 0.85rem;
+  color: #8a2b2b;
+}
+
+.bloc-compte-desactive .bouton-secondaire-large {
+  width: 100%;
+}

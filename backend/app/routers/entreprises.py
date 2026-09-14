@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.db import pool_central
+from app.db import pool_central, get_pool_entreprise
 from app.security.captcha import generer_captcha
 from app.security.protection import enregistrer_captcha, verifier_et_consommer_captcha
 from app.security.onboarding_store import (
@@ -171,6 +171,13 @@ def inscription(payload: InscriptionPayload):
                 if cur.fetchone():
                     return JSONResponse(status_code=409, content={
                         "message": "Une inscription existe déjà avec ce numéro d'identification fiscale.",
+                    })
+
+            if payload.numeroCin:
+                cur.execute("SELECT id FROM entreprise WHERE numero_cin = %s", (payload.numeroCin,))
+                if cur.fetchone():
+                    return JSONResponse(status_code=409, content={
+                        "message": "Ce numéro de carte d'identité nationale est déjà utilisé par un autre compte.",
                     })
     finally:
         pool_central.putconn(conn)
@@ -351,13 +358,17 @@ def choisir_abonnement(payload: AbonnementPayload):
     if not _statut_est(payload.entrepriseId, "valide"):
         return JSONResponse(status_code=400, content={"message": "Votre dossier doit être validé avant de choisir un abonnement."})
 
+    # Limite de 30 connexions pour la période d'essai gratuite (section 3
+    # de la demande de l'entreprise sur la gestion des abonnements).
+    visites_max = 30 if payload.plan == "essai" else None
+
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                """INSERT INTO abonnement (entreprise_id, type_plan, statut)
-                   VALUES (%s, %s, 'en_attente')""",
-                (payload.entrepriseId, payload.plan),
+                """INSERT INTO abonnement (entreprise_id, type_plan, statut, visites_max)
+                   VALUES (%s, %s, 'en_attente', %s)""",
+                (payload.entrepriseId, payload.plan, visites_max),
             )
         conn.commit()
     finally:
@@ -437,3 +448,101 @@ def _statut_est(entreprise_id: int, statut_attendu: str) -> bool:
     finally:
         pool_central.putconn(conn)
     return bool(ligne) and ligne[0] == statut_attendu
+
+
+# ===========================================================================
+# Export des données — accessible même après expiration de l'essai gratuit
+# (section 3 : "aucune perte de données", "export possible même après
+# expiration"). Le nom de la base entreprise est retrouvé via l'email de
+# l'utilisateur, sans exiger de connexion active.
+# ===========================================================================
+
+@router.get("/export-donnees")
+def exporter_donnees(email: str):
+    """
+    Exporte l'intégralité des données métier de l'entreprise associée à cet
+    email (clients, produits, commandes, factures...), au format JSON,
+    indépendamment du statut de l'abonnement — l'essai expiré bloque
+    l'usage de la plateforme, jamais l'accès aux données déjà créées.
+    """
+    email = email.strip().lower()
+
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT nom_base FROM entreprise WHERE email_contact = %s", (email,))
+            ligne = cur.fetchone()
+    finally:
+        pool_central.putconn(conn)
+
+    if not ligne:
+        return JSONResponse(status_code=404, content={"message": "Compte introuvable."})
+
+    nom_base = ligne[0]
+    pool_tenant = get_pool_entreprise(nom_base)
+    conn = pool_tenant.getconn()
+    export = {}
+    try:
+        with conn.cursor() as cur:
+            for table in ["client", "fournisseur", "produit", "commande", "ligne_commande",
+                          "facture", "paiement", "achat", "ligne_achat", "mouvement_stock"]:
+                cur.execute(f"SELECT * FROM {table}")
+                colonnes = [d[0] for d in cur.description]
+                lignes = [dict(zip(colonnes, row)) for row in cur.fetchall()]
+                export[table] = lignes
+    finally:
+        pool_tenant.putconn(conn)
+
+    return {"entreprise": nom_base, "export": export}
+
+
+# ===========================================================================
+# Souscription à un abonnement payant pour un compte déjà existant — permet
+# notamment de réactiver un compte bloqué après expiration de l'essai
+# gratuit (section "encouragement à l'abonnement").
+# ===========================================================================
+
+class SouscriptionPayload(BaseModel):
+    email: str
+    plan: str  # "standard" | "premium"
+
+
+PLANS_PAYANTS = {"standard", "premium"}
+
+
+@router.post("/souscrire")
+def souscrire_abonnement(payload: SouscriptionPayload):
+    """
+    Volontairement accessible sans authentification : un compte dont
+    l'essai a expiré ne peut plus obtenir de jeton de connexion, il doit
+    donc pouvoir souscrire un abonnement pour réactiver son accès sans
+    être déjà connecté.
+    """
+    if payload.plan not in PLANS_PAYANTS:
+        return JSONResponse(status_code=400, content={"message": "Plan invalide."})
+
+    email = payload.email.strip().lower()
+
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, statut FROM entreprise WHERE email_contact = %s", (email,))
+            ligne = cur.fetchone()
+            if not ligne:
+                return JSONResponse(status_code=404, content={"message": "Compte introuvable."})
+            entreprise_id, _ = ligne
+
+            # Paiement simulé (environnement de développement) : dans un
+            # contexte réel, l'activation n'interviendrait qu'après
+            # confirmation effective du paiement par le prestataire.
+            cur.execute(
+                """INSERT INTO abonnement (entreprise_id, type_plan, statut, visites_max)
+                   VALUES (%s, %s, 'actif', NULL)""",
+                (entreprise_id, payload.plan),
+            )
+            cur.execute("UPDATE entreprise SET statut = 'actif' WHERE id = %s", (entreprise_id,))
+        conn.commit()
+    finally:
+        pool_central.putconn(conn)
+
+    return {"message": "Abonnement activé avec succès. Vous pouvez maintenant vous reconnecter."}

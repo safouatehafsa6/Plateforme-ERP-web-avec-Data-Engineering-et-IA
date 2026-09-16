@@ -6,6 +6,7 @@ import Connexion from "./pages/Connexion";
 import Inscription from "./pages/Inscription";
 import MotDePasseOublie from "./pages/MotDePasseOublie";
 import Abonnement from "./pages/Abonnement";
+import Collaborateurs from "./pages/Collaborateurs";
 import TableauDeBord from "./pages/TableauDeBord";
 
 // Le Header est rendu une seule fois ici, en dehors des <Routes> :
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="/inscription" element={<Inscription />} />
             <Route path="/mot-de-passe-oublie" element={<MotDePasseOublie />} />
             <Route path="/abonnement" element={<Abonnement />} />
+            <Route path="/collaborateurs" element={<Collaborateurs />} />
             <Route path="/dashboard" element={<TableauDeBord />} />
           </Routes>
         </LangueProvider>

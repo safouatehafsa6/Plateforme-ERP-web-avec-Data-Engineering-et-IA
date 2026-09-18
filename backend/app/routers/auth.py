@@ -115,20 +115,26 @@ def _verifier_et_incrementer_essai(entreprise_id: int) -> dict | None:
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
+            # On regarde le DERNIER abonnement de l'entreprise, quel que
+            # soit son type — c'est lui qui représente l'état réel actuel.
+            # Un ancien essai resté à statut 'actif' ne doit jamais
+            # reprendre le dessus une fois qu'un abonnement payant plus
+            # récent a été souscrit (voir correction du 17/09/2026 :
+            # bug de réactivation qui ignorait le nouvel abonnement).
             cur.execute(
                 """
-                SELECT id, visites_utilisees, visites_max FROM abonnement
-                WHERE entreprise_id = %s AND type_plan ILIKE 'essai' AND statut = 'actif'
+                SELECT id, type_plan, visites_utilisees, visites_max FROM abonnement
+                WHERE entreprise_id = %s
                 ORDER BY id DESC LIMIT 1
                 """,
                 (entreprise_id,),
             )
             ligne = cur.fetchone()
 
-            if not ligne or ligne[2] is None:
-                return None  # pas d'essai actif avec limite définie
+            if not ligne or ligne[1].lower() != "essai" or ligne[3] is None:
+                return None  # dernier abonnement = payant, ou pas de limite définie
 
-            abonnement_id, visites_utilisees, visites_max = ligne
+            abonnement_id, _, visites_utilisees, visites_max = ligne
 
             if visites_utilisees >= visites_max:
                 # Limite déjà atteinte : on bloque SANS incrémenter davantage.

@@ -1,5 +1,4 @@
 import os
-import re
 import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
@@ -16,15 +15,12 @@ from app.security.protection import (
     reinitialiser_tentatives,
 )
 from app.security.recaptcha import verifier_recaptcha
-from app.security import reset_password_store as reset_store
-from app.utils.email_sender import envoyer_code_otp
+from app.security.validation_inscription import valider_mot_de_passe
+from app.security import password_reset_store as reset_store
+from app.utils.email_sender import envoyer_code_reinitialisation
 from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-REGEX_LETTRE = re.compile(r"[A-Za-zÀ-ÿ]")
-REGEX_CHIFFRE = re.compile(r"\d")
-REGEX_SPECIAL = re.compile(r"[^A-Za-zÀ-ÿ0-9]")
 
 
 class LoginPayload(BaseModel):
@@ -42,124 +38,6 @@ def obtenir_captcha():
     if os.getenv("ENV", "dev") != "production":
         print(f"[DEV] Captcha {captcha['id']} -> code: {captcha['code']}")
     return {"captchaId": captcha["id"], "svg": captcha["svg"]}
-
-
-def _chercher_super_admin(email: str):
-    """Recherche dans la base centrale (Super Administrateur SaaS)."""
-    conn = pool_central.getconn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, nom, email, mot_de_passe FROM super_admin WHERE email = %s",
-                (email,),
-            )
-            return cur.fetchone()
-    finally:
-        pool_central.putconn(conn)
-
-
-def _chercher_entreprise_par_email_admin(email: str):
-    """
-    Étape 1 du routage multi-tenant : à partir d'un email, retrouve
-    l'entreprise correspondante (et sa base dédiée) dans la base centrale.
-    Ne présume pas que l'utilisateur y existe déjà — juste que l'entreprise
-    est active et que sa base a été provisionnée.
-    """
-    conn = pool_central.getconn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id, nom_base, statut FROM entreprise WHERE email_contact = %s",
-                (email,),
-            )
-            return cur.fetchone()
-    finally:
-        pool_central.putconn(conn)
-
-
-def _chercher_utilisateur_entreprise(nom_base: str, email: str):
-    """
-    Étape 2 du routage multi-tenant : une fois la base de l'entreprise
-    identifiée, on s'y connecte réellement pour vérifier les identifiants
-    de l'utilisateur métier (ici l'administrateur créé au provisioning).
-    """
-    pool_tenant = get_pool_entreprise(nom_base)
-    conn = pool_tenant.getconn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT u.id, u.nom, u.prenom, u.email, u.mot_de_passe, u.actif, r.nom
-                FROM utilisateur u
-                LEFT JOIN role r ON r.id = u.role_id
-                WHERE u.email = %s
-                """,
-                (email,),
-            )
-            return cur.fetchone()
-    finally:
-        pool_tenant.putconn(conn)
-
-
-def _verifier_et_incrementer_essai(entreprise_id: int) -> dict | None:
-    """
-    Gère la limite de 30 connexions pour un abonnement de type Essai.
-
-    Retourne None si l'entreprise n'a pas d'abonnement de type Essai actif
-    (rien à faire dans ce cas — plan payant, pas de limite).
-
-    Sinon, incrémente le compteur de visites et retourne un dictionnaire
-    avec le nombre de visites utilisées/restantes, et si l'accès doit être
-    bloqué (limite déjà atteinte AVANT cette connexion).
-    """
-    conn = pool_central.getconn()
-    try:
-        with conn.cursor() as cur:
-            # On regarde le DERNIER abonnement de l'entreprise, quel que
-            # soit son type — c'est lui qui représente l'état réel actuel.
-            # Un ancien essai resté à statut 'actif' ne doit jamais
-            # reprendre le dessus une fois qu'un abonnement payant plus
-            # récent a été souscrit (voir correction du 17/09/2026 :
-            # bug de réactivation qui ignorait le nouvel abonnement).
-            cur.execute(
-                """
-                SELECT id, type_plan, visites_utilisees, visites_max FROM abonnement
-                WHERE entreprise_id = %s
-                ORDER BY id DESC LIMIT 1
-                """,
-                (entreprise_id,),
-            )
-            ligne = cur.fetchone()
-
-            if not ligne or ligne[1].lower() != "essai" or ligne[3] is None:
-                return None  # dernier abonnement = payant, ou pas de limite définie
-
-            abonnement_id, _, visites_utilisees, visites_max = ligne
-
-            if visites_utilisees >= visites_max:
-                # Limite déjà atteinte : on bloque SANS incrémenter davantage.
-                return {
-                    "bloque": True,
-                    "visites_utilisees": visites_utilisees,
-                    "visites_restantes": 0,
-                    "visites_max": visites_max,
-                }
-
-            nouvelles_visites = visites_utilisees + 1
-            cur.execute(
-                "UPDATE abonnement SET visites_utilisees = %s WHERE id = %s",
-                (nouvelles_visites, abonnement_id),
-            )
-        conn.commit()
-    finally:
-        pool_central.putconn(conn)
-
-    return {
-        "bloque": False,
-        "visites_utilisees": nouvelles_visites,
-        "visites_restantes": max(visites_max - nouvelles_visites, 0),
-        "visites_max": visites_max,
-    }
 
 
 @router.post("/login")
@@ -194,237 +72,284 @@ async def login(payload: LoginPayload):
                     "requiresRecaptcha": True,
                 })
 
-    # --- Couche 3a : d'abord, est-ce un Super Administrateur SaaS ? ---
-    ligne_super_admin = _chercher_super_admin(email)
+    # --- Couche 3 : vérification réelle des identifiants ---
+    # Point d'entrée unique pour tous les profils (Super Administrateur
+    # ET comptes d'entreprise) : on cherche d'abord dans la base centrale
+    # (super_admin), puis, si l'email n'y figure pas, dans l'index central
+    # des comptes d'entreprise (compte_index) pour savoir dans quelle base
+    # entreprise chercher — sans que la personne ait à préciser elle-même
+    # à quelle entreprise elle appartient (voir diagramme de séquence
+    # "Routage multi-tenant").
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, nom, email, mot_de_passe FROM super_admin WHERE email = %s",
+                (email,),
+            )
+            ligne_super_admin = cur.fetchone()
+
+            ligne_index = None
+            if not ligne_super_admin:
+                cur.execute(
+                    "SELECT entreprise_id, nom_base FROM compte_index WHERE email = %s",
+                    (email,),
+                )
+                ligne_index = cur.fetchone()
+    finally:
+        pool_central.putconn(conn)
 
     if ligne_super_admin:
         utilisateur_id, nom, email_bd, hash_stocke = ligne_super_admin
-        if bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8")):
-            reinitialiser_tentatives(email)
-            expiration = datetime.now(timezone.utc) + timedelta(hours=8)
-            token = jwt.encode(
-                {"id": utilisateur_id, "email": email_bd, "role": "super_admin", "exp": expiration},
-                os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
-                algorithm="HS256",
-            )
-            return {"token": token, "utilisateur": {"id": utilisateur_id, "nom": nom, "email": email_bd, "role": "super_admin"}}
-        # Email de super admin trouvé mais mauvais mot de passe : on
-        # traite l'échec normalement plus bas (pas de fuite d'information
-        # sur l'existence du compte).
+        mot_de_passe_valide = bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
-    # --- Couche 3b : sinon, routage multi-tenant vers la bonne entreprise ---
-    ligne_entreprise = _chercher_entreprise_par_email_admin(email)
-    utilisateur_tenant = None
-    nom_base = None
-
-    if ligne_entreprise:
-        entreprise_id, nom_base, statut_entreprise = ligne_entreprise
-        if statut_entreprise == "actif":
-            utilisateur_tenant = _chercher_utilisateur_entreprise(nom_base, email)
-
-    mot_de_passe_valide = False
-    if utilisateur_tenant:
-        utilisateur_id, nom, prenom, email_bd, hash_stocke, actif, role_nom = utilisateur_tenant
-        mot_de_passe_valide = actif and bcrypt.checkpw(
-            payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8")
-        )
-
-    if not utilisateur_tenant or not mot_de_passe_valide:
-        enregistrer_echec(email)
-        etat_apres = etat_protection(email)
-
-        # Cas particulier : l'entreprise existe mais n'est pas encore
-        # activée (inscription en cours, pas encore payée/validée).
-        if ligne_entreprise and ligne_entreprise[2] != "actif":
-            return JSONResponse(status_code=403, content={
-                "message": "Votre inscription n'est pas encore activée. Merci de terminer le parcours d'inscription.",
+        if not mot_de_passe_valide:
+            enregistrer_echec(email)
+            etat_apres = etat_protection(email)
+            return JSONResponse(status_code=401, content={
+                "message": "Adresse e-mail ou mot de passe incorrect.",
+                "requiresCaptcha": etat_apres["protection_active"],
+                "requiresRecaptcha": etat_apres["echecs"] >= 4,
             })
 
-        return JSONResponse(status_code=401, content={
-            "message": "Adresse e-mail ou mot de passe incorrect.",
-            "requiresCaptcha": etat_apres["protection_active"],
-            "requiresRecaptcha": etat_apres["echecs"] >= 4,
-        })
+        reinitialiser_tentatives(email)
+        expiration = datetime.now(timezone.utc) + timedelta(hours=8)
+        token = jwt.encode(
+            {"id": utilisateur_id, "email": email_bd, "role": "super_admin", "exp": expiration},
+            os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+            algorithm="HS256",
+        )
+        return {"token": token, "utilisateur": {"id": utilisateur_id, "nom": nom, "email": email_bd}}
 
-    reinitialiser_tentatives(email)
+    if ligne_index:
+        entreprise_id, nom_base = ligne_index
 
-    # --- Gestion de la période d'essai gratuite (30 connexions max) ---
-    # S'applique uniquement aux comptes entreprise (jamais aux Super
-    # Administrateurs SaaS, qui n'ont pas d'abonnement).
-    info_essai = _verifier_et_incrementer_essai(entreprise_id)
-    if info_essai and info_essai.get("bloque"):
-        return JSONResponse(status_code=403, content={
-            "message": (
-                "Votre période d'essai gratuite est terminée (30 connexions "
-                "utilisées). Souscrivez un abonnement pour continuer à "
-                "utiliser la plateforme. Vos données restent conservées et "
-                "exportables à tout moment."
-            ),
-            "essaiExpire": True,
-        })
+        # L'abonnement doit être actif pour autoriser la connexion —
+        # sinon, on bloque avant même d'atteindre la base de l'entreprise
+        # (une entreprise suspendue/en_attente/refusée n'a pas accès).
+        conn = pool_central.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT statut FROM entreprise WHERE id = %s", (entreprise_id,))
+                ligne_statut = cur.fetchone()
+        finally:
+            pool_central.putconn(conn)
 
-    expiration = datetime.now(timezone.utc) + timedelta(hours=8)
-    token = jwt.encode(
-        {
-            "id": utilisateur_id, "email": email_bd, "role": role_nom or "utilisateur",
-            "nomBase": nom_base, "exp": expiration,
-        },
-        os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
-        algorithm="HS256",
-    )
+        if not ligne_statut or ligne_statut[0] != "actif":
+            return JSONResponse(status_code=403, content={
+                "message": "Ce compte entreprise n'est pas (ou plus) actif. Contactez votre administrateur.",
+            })
 
-    reponse = {
-        "token": token,
-        "utilisateur": {
-            "id": utilisateur_id, "nom": f"{prenom} {nom}".strip(),
-            "email": email_bd, "role": role_nom or "utilisateur",
-        },
-    }
-    if info_essai:
-        reponse["essai"] = {
-            "visitesUtilisees": info_essai["visites_utilisees"],
-            "visitesRestantes": info_essai["visites_restantes"],
-            "visitesMax": info_essai["visites_max"],
-        }
-    return reponse
+        pool_tenant = get_pool_entreprise(nom_base)
+        conn = pool_tenant.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT u.id, u.nom, u.prenom, u.mot_de_passe, u.actif, r.nom AS role_nom
+                    FROM utilisateur u
+                    LEFT JOIN role r ON r.id = u.role_id
+                    WHERE u.email = %s
+                    """,
+                    (email,),
+                )
+                ligne_utilisateur = cur.fetchone()
+        finally:
+            pool_tenant.putconn(conn)
+
+        if ligne_utilisateur:
+            utilisateur_id, nom, prenom, hash_stocke, actif, role_nom = ligne_utilisateur
+            mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+
+            if mot_de_passe_valide:
+                reinitialiser_tentatives(email)
+                expiration = datetime.now(timezone.utc) + timedelta(hours=8)
+                token = jwt.encode(
+                    {
+                        "id": utilisateur_id, "email": email, "role": role_nom or "Utilisateur",
+                        "nomBase": nom_base, "entrepriseId": entreprise_id, "exp": expiration,
+                    },
+                    os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+                    algorithm="HS256",
+                )
+                return {
+                    "token": token,
+                    "utilisateur": {
+                        "id": utilisateur_id, "nom": f"{prenom} {nom}".strip(), "email": email,
+                        "role": role_nom, "entrepriseId": entreprise_id,
+                    },
+                }
+
+    # Ni super_admin, ni compte d'entreprise valide : même message
+    # générique dans tous les cas (anti-énumération).
+    enregistrer_echec(email)
+    etat_apres = etat_protection(email)
+    return JSONResponse(status_code=401, content={
+        "message": "Adresse e-mail ou mot de passe incorrect.",
+        "requiresCaptcha": etat_apres["protection_active"],
+        "requiresRecaptcha": etat_apres["echecs"] >= 4,
+    })
 
 
-# ===========================================================================
-# Mot de passe oublié : demande de code -> vérification -> nouveau mot de
-# passe, avec les mêmes règles de sécurité que l'inscription (politique de
-# mot de passe, indicateur de force côté frontend, captcha).
-# ===========================================================================
 
-class DemandeReinitialisationPayload(BaseModel):
+# ---------------------------------------------------------------------
+# Parcours "Mot de passe oublié" : email -> code OTP -> nouveau mot de
+# passe (mêmes règles de sécurité que l'inscription : politique de mot
+# de passe, indicateur de force côté frontend, CAPTCHA côté backend).
+# Toutes les validations sont revérifiées ici, jamais uniquement côté
+# frontend — même principe que pour l'inscription (voir entreprises.py).
+#
+# Sécurité : la vérification du code OTP émet un jeton de réinitialisation
+# à usage unique et imprévisible (password_reset_store.py), exigé pour
+# l'étape finale. Sans ce jeton, connaître uniquement l'email ne suffit
+# pas à déclencher le changement de mot de passe — contrairement à une
+# implémentation qui se contenterait de marquer l'email comme "autorisé"
+# pendant N minutes, ce qui laisserait une fenêtre où un tiers connaissant
+# l'email (mais pas le code reçu par la victime) pourrait changer le mot
+# de passe à sa place.
+# ---------------------------------------------------------------------
+
+MESSAGE_GENERIQUE_ENVOI_OTP = (
+    "Si un compte existe avec cette adresse email, un code de "
+    "vérification vient de lui être envoyé."
+)
+
+
+def _compte_existe(email: str) -> bool:
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM super_admin WHERE email = %s", (email,))
+            return cur.fetchone() is not None
+    finally:
+        pool_central.putconn(conn)
+
+
+class DemandeResetPayload(BaseModel):
     email: str
 
 
-class VerifierCodeReinitialisationPayload(BaseModel):
+@router.post("/mot-de-passe-oublie")
+def demander_reinitialisation(payload: DemandeResetPayload):
+    email = payload.email.strip().lower()
+
+    # On ne renvoie jamais une erreur différente selon que le compte
+    # existe ou non : la réponse HTTP est identique dans les deux cas
+    # (anti-énumération des comptes).
+    if _compte_existe(email) and reset_store.peut_renvoyer_otp(email):
+        code = reset_store.generer_et_stocker_otp(email)
+        try:
+            envoyer_code_reinitialisation(email, code)
+        except Exception:
+            print(f"[ERREUR] Échec d'envoi de l'email de réinitialisation à {email}")
+
+    return {"message": MESSAGE_GENERIQUE_ENVOI_OTP}
+
+
+class RenvoiResetOtpPayload(BaseModel):
+    email: str
+
+
+@router.post("/renvoyer-code-reinitialisation")
+def renvoyer_code_reinitialisation(payload: RenvoiResetOtpPayload):
+    email = payload.email.strip().lower()
+
+    if not reset_store.peut_renvoyer_otp(email):
+        attente = reset_store.secondes_avant_renvoi(email)
+        return JSONResponse(status_code=429, content={
+            "message": f"Veuillez patienter {attente} secondes avant de redemander un code.",
+            "secondesAvantRenvoi": attente,
+        })
+
+    if _compte_existe(email):
+        code = reset_store.generer_et_stocker_otp(email)
+        try:
+            envoyer_code_reinitialisation(email, code)
+        except Exception:
+            print(f"[ERREUR] Échec d'envoi de l'email de réinitialisation à {email}")
+
+    return {"message": MESSAGE_GENERIQUE_ENVOI_OTP}
+
+
+class VerifierResetOtpPayload(BaseModel):
     email: str
     code: str
 
 
+@router.post("/verifier-code-reinitialisation")
+def verifier_code_reinitialisation(payload: VerifierResetOtpPayload):
+    email = payload.email.strip().lower()
+    succes, raison = reset_store.verifier_otp(email, payload.code)
+
+    if not succes:
+        messages = {
+            "aucun_code_actif": "Aucun code actif. Demandez un nouveau code.",
+            "trop_de_tentatives": "Trop de tentatives incorrectes. Demandez un nouveau code.",
+            "expire": "Ce code a expiré. Demandez un nouveau code.",
+            "code_incorrect": "Code incorrect.",
+        }
+        return JSONResponse(status_code=400, content={"message": messages.get(raison, "Code invalide."), "raison": raison})
+
+    # Jeton à usage unique, exigé pour l'étape suivante : empêche un
+    # appel direct à /reinitialiser-mot-de-passe sans passer par la
+    # vérification du code.
+    return {"message": "Vérification réussie.", "jetonReset": reset_store.obtenir_jeton_reset(email)}
+
+
 class ReinitialiserMotDePassePayload(BaseModel):
     email: str
+    jetonReset: str
     nouveauMotDePasse: str
     nouveauMotDePasseConfirmation: str
     captchaId: str
     captchaValeur: str
 
 
-def _localiser_compte(email: str):
-    """Retourne ('super_admin', None) ou ('tenant', nom_base) selon où
-    vit ce compte, ou None si l'email n'existe nulle part. Réutilise la
-    même logique de routage que /login."""
-    if _chercher_super_admin(email):
-        return ("super_admin", None)
-
-    ligne_entreprise = _chercher_entreprise_par_email_admin(email)
-    if ligne_entreprise:
-        _, nom_base, statut = ligne_entreprise
-        if statut == "actif" and _chercher_utilisateur_entreprise(nom_base, email):
-            return ("tenant", nom_base)
-
-    return None
-
-
-@router.post("/mot-de-passe-oublie")
-def demander_reinitialisation(payload: DemandeReinitialisationPayload):
-    email = payload.email.strip().lower()
-
-    # Toujours répondre le même message, que l'email existe ou non : ne
-    # jamais révéler si une adresse est enregistrée dans le système
-    # (principe standard de sécurité contre l'énumération de comptes).
-    reponse_generique = {
-        "message": "Si un compte existe avec cet email, un code de vérification vient d'être envoyé.",
-    }
-
-    localisation = _localiser_compte(email)
-    if not localisation:
-        return reponse_generique
-
-    if not reset_store.peut_renvoyer(email):
-        return reponse_generique
-
-    code = reset_store.generer_et_stocker_otp(email)
-    try:
-        envoyer_code_otp(email, code)
-    except Exception:
-        pass  # on ne révèle jamais d'échec technique à l'appelant ici
-
-    return reponse_generique
-
-
-@router.post("/verifier-code-reinitialisation")
-def verifier_code_reinitialisation(payload: VerifierCodeReinitialisationPayload):
-    email = payload.email.strip().lower()
-    ok, raison = reset_store.verifier_otp(email, payload.code)
-
-    if not ok:
-        messages = {
-            "aucun_code_actif": "Aucune demande de réinitialisation active. Recommencez.",
-            "trop_de_tentatives": "Trop de tentatives incorrectes. Demandez un nouveau code.",
-            "expire": "Ce code a expiré. Demandez un nouveau code.",
-            "code_incorrect": "Code incorrect.",
-        }
-        return JSONResponse(status_code=400, content={"message": messages.get(raison, "Code invalide.")})
-
-    return {"message": "Code vérifié. Vous pouvez définir un nouveau mot de passe."}
+@router.get("/captcha-reinitialisation")
+def obtenir_captcha_reinitialisation():
+    """Captcha dédié à l'étape finale de réinitialisation (même exigence
+    que pour l'inscription : le nouveau mot de passe doit être protégé
+    par un CAPTCHA, en plus du jeton de réinitialisation)."""
+    captcha = generer_captcha()
+    enregistrer_captcha(captcha["id"], captcha["code"])
+    return {"captchaId": captcha["id"], "svg": captcha["svg"]}
 
 
 @router.post("/reinitialiser-mot-de-passe")
 def reinitialiser_mot_de_passe(payload: ReinitialiserMotDePassePayload):
     email = payload.email.strip().lower()
 
-    if not reset_store.code_deja_verifie(email):
+    if not reset_store.verifier_et_consommer_jeton_reset(email, payload.jetonReset):
         return JSONResponse(status_code=400, content={
-            "message": "Vérification du code requise avant de définir un nouveau mot de passe.",
+            "message": "Session de réinitialisation invalide ou expirée. Recommencez la procédure.",
         })
 
     if not verifier_et_consommer_captcha(payload.captchaId, payload.captchaValeur):
         return JSONResponse(status_code=400, content={"message": "Code de sécurité incorrect ou expiré."})
 
-    mdp = payload.nouveauMotDePasse
-    if (
-        len(mdp) < 8
-        or not REGEX_LETTRE.search(mdp)
-        or not REGEX_CHIFFRE.search(mdp)
-        or not REGEX_SPECIAL.search(mdp)
-    ):
+    # Même politique de mot de passe que pour l'inscription (8 caractères
+    # minimum, lettres + chiffres + caractère spécial), revérifiée ici.
+    erreur = valider_mot_de_passe(payload.nouveauMotDePasse, payload.nouveauMotDePasseConfirmation)
+    if erreur:
+        return JSONResponse(status_code=400, content={"message": erreur})
+
+    if not _compte_existe(email):
         return JSONResponse(status_code=400, content={
-            "message": "Le mot de passe doit contenir au moins 8 caractères, avec des lettres, des chiffres et un caractère spécial.",
+            "message": "Session de réinitialisation invalide ou expirée. Recommencez la procédure.",
         })
-    if mdp != payload.nouveauMotDePasseConfirmation:
-        return JSONResponse(status_code=400, content={"message": "Les deux mots de passe ne correspondent pas."})
 
-    localisation = _localiser_compte(email)
-    if not localisation:
-        # Ne devrait normalement pas arriver si le code a bien été vérifié
-        # pour cet email, mais on reste défensif.
-        return JSONResponse(status_code=404, content={"message": "Compte introuvable."})
+    nouveau_hash = bcrypt.hashpw(payload.nouveauMotDePasse.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE super_admin SET mot_de_passe = %s WHERE email = %s", (nouveau_hash, email))
+        conn.commit()
+    finally:
+        pool_central.putconn(conn)
 
-    type_compte, nom_base = localisation
-    nouveau_hash = bcrypt.hashpw(mdp.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    # Par sécurité, on efface aussi les échecs de connexion enregistrés
+    # pour cet email : un nouveau mot de passe légitime ne doit pas
+    # rester bloqué derrière l'ancien compteur d'échecs.
+    reinitialiser_tentatives(email)
 
-    if type_compte == "super_admin":
-        conn = pool_central.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE super_admin SET mot_de_passe = %s WHERE email = %s", (nouveau_hash, email))
-            conn.commit()
-        finally:
-            pool_central.putconn(conn)
-    else:
-        pool_tenant = get_pool_entreprise(nom_base)
-        conn = pool_tenant.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE utilisateur SET mot_de_passe = %s WHERE email = %s", (nouveau_hash, email))
-            conn.commit()
-        finally:
-            pool_tenant.putconn(conn)
-
-    reset_store.supprimer(email)
-    reinitialiser_tentatives(email)  # efface aussi tout blocage captcha lié aux échecs de login précédents
-
-    return {"message": "Mot de passe réinitialisé avec succès."}
+    return {"message": "Mot de passe mis à jour avec succès. Vous pouvez vous connecter."}

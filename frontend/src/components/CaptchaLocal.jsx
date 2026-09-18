@@ -16,14 +16,26 @@ const CaptchaLocal = forwardRef(function CaptchaLocal(
   const [captchaId, setCaptchaId] = useState(null);
   const [svg, setSvg] = useState("");
   const [chargement, setChargement] = useState(false);
+  const [erreur, setErreur] = useState("");
 
   async function rafraichir() {
     setChargement(true);
+    setErreur("");
     try {
       const data = await apiGet(endpoint);
+      if (!data?.svg) {
+        throw new Error("Réponse du serveur incomplète (image manquante).");
+      }
       setCaptchaId(data.captchaId);
       setSvg(data.svg);
       onChangeValeur("");
+    } catch (err) {
+      // Auparavant l'erreur n'était pas interceptée : la case restait
+      // simplement vide, sans indication de ce qui n'allait pas.
+      setSvg("");
+      setCaptchaId(null);
+      setErreur("Impossible de charger le code de sécurité. Vérifiez que le serveur est démarré, puis réessayez.");
+      console.error(`Captcha (${endpoint}) :`, err);
     } finally {
       setChargement(false);
     }
@@ -43,7 +55,15 @@ const CaptchaLocal = forwardRef(function CaptchaLocal(
     <div className="champ">
       <label htmlFor="captcha">Code de sécurité</label>
       <div className="captcha-ligne">
-        <div className="captcha-image" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div className="captcha-image">
+          {svg ? (
+            <div className="captcha-image__svg" dangerouslySetInnerHTML={{ __html: svg }} />
+          ) : (
+            <span className="captcha-image__vide">
+              {chargement ? "Chargement…" : "Indisponible"}
+            </span>
+          )}
+        </div>
         <button
           type="button"
           className="captcha-refresh"
@@ -55,6 +75,9 @@ const CaptchaLocal = forwardRef(function CaptchaLocal(
           <RotateCw size={16} strokeWidth={2} className={chargement ? "captcha-refresh__icone--rotation" : ""} />
         </button>
       </div>
+
+      {erreur && <div className="captcha-erreur">{erreur}</div>}
+
       <input
         id="captcha"
         type="text"

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import exiger_role_admin
+from app.services.provisioning import indexer_compte_central
 
 router = APIRouter(prefix="/api/utilisateurs", tags=["utilisateurs"])
 
@@ -105,6 +106,13 @@ def creer_utilisateur(payload: NouvelUtilisateurPayload, utilisateur=Depends(exi
         conn.commit()
     finally:
         pool_tenant.putconn(conn)
+
+    # Indexation centrale : indispensable pour que ce nouveau collaborateur
+    # puisse se connecter via le point d'entrée unique (voir routage
+    # multi-tenant) — sans mot de passe, seulement la correspondance
+    # email -> entreprise.
+    if "entrepriseId" in utilisateur:
+        indexer_compte_central(email, utilisateur["entrepriseId"], utilisateur["nomBase"])
 
     return {
         "id": nouvel_id,

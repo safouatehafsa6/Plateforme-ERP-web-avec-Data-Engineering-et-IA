@@ -232,6 +232,56 @@ a {
   border-color: var(--brass);
 }
 
+/* Champ mot de passe avec icône œil (afficher/masquer) */
+.champ-mot-de-passe {
+  position: relative;
+}
+
+.champ-mot-de-passe input {
+  width: 100%;
+  padding: 0.65rem 2.6rem 0.65rem 0.8rem;
+  border: 1px solid var(--paper-line);
+  border-radius: 6px;
+  font-size: 0.96rem;
+  background: var(--carte-fond);
+  color: var(--text-dark);
+}
+
+.champ-mot-de-passe input:focus {
+  outline: 2px solid var(--brass);
+  outline-offset: 1px;
+  border-color: var(--brass);
+}
+
+.champ-mot-de-passe__bascule {
+  position: absolute;
+  top: 50%;
+  right: 0.6rem;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.champ-mot-de-passe__bascule:hover {
+  color: var(--brass);
+}
+
+.succes-message {
+  background: #eaf3f2;
+  border: 1px solid #bcdad7;
+  color: var(--teal);
+  font-size: 0.85rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  margin-bottom: 1.1rem;
+}
+
 .erreur-message {
   background: #fbeae6;
   border: 1px solid #f0c4b8;
@@ -297,6 +347,30 @@ a {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.captcha-image__svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* Affiché quand le code n'a pas pu être chargé : évite une case
+   totalement vide, qui ne dit rien à l'utilisateur. */
+.captcha-image__vide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  color: var(--text-muted);
+}
+
+.captcha-erreur {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--danger);
 }
 
 .captcha-refresh {
@@ -959,127 +1033,212 @@ a {
   flex-shrink: 0;
 }
 
-/* ---- Champ mot de passe avec icône œil ---- */
-.champ-mot-de-passe {
-  position: relative;
+/* ---- Rôles & Permissions (matrice RBAC) ---- */
+
+.rbac-mise-en-page {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 1.5rem;
 }
 
-.champ-mot-de-passe input {
-  width: 100%;
-  padding-right: 2.6rem;
+@media (max-width: 768px) {
+  .rbac-mise-en-page {
+    grid-template-columns: 1fr;
+  }
 }
 
-.champ-mot-de-passe__oeil {
-  position: absolute;
-  top: 50%;
-  right: 0.75rem;
-  transform: translateY(-50%);
-  background: none;
-  border: none;
-  padding: 0.2rem;
-  display: flex;
-  align-items: center;
-  color: var(--text-muted, #6b7280);
-  cursor: pointer;
-}
-
-.champ-mot-de-passe__oeil:hover {
-  color: var(--text-dark, #1f2937);
-}
-
-[dir="rtl"] .champ-mot-de-passe input {
-  padding-right: 0.75rem;
-  padding-left: 2.6rem;
-}
-
-[dir="rtl"] .champ-mot-de-passe__oeil {
-  right: auto;
-  left: 0.75rem;
-}
-
-.succes-message {
-  background: #e6f4ea;
-  color: #1f6b3a;
-  border: 1px solid #b7e0c3;
-  border-radius: 6px;
-  padding: 0.7rem 0.9rem;
-  font-size: 0.88rem;
-  margin-bottom: 1rem;
-}
-
-/* ---- Bandeau d'information période d'essai ---- */
-.bandeau-essai {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  background: #fff8e6;
-  border: 1px solid #f0d896;
-  color: #7a5b12;
-  border-radius: 6px;
-  padding: 0.7rem 1rem;
-  font-size: 0.88rem;
-  margin-bottom: 1.25rem;
-}
-
-/* ---- Avertissement critique (essai bientôt expiré) ---- */
-.bandeau-essai--critique {
-  align-items: flex-start;
-  background: #fdeeee;
-  border-color: #f0b8b8;
-  color: #8a2b2b;
-  flex-direction: row;
-  gap: 0.8rem;
-}
-
-.bandeau-essai--critique__contenu p {
-  margin: 0 0 0.8rem 0;
-}
-
-.bandeau-essai--critique__actions {
-  display: flex;
-  gap: 0.6rem;
-  flex-wrap: wrap;
-}
-
-.bandeau-essai--critique__actions .bouton-principal {
-  width: auto;
-  padding: 0.55rem 1.1rem;
-  text-decoration: none;
-  display: inline-block;
-}
-
-/* ---- Bouton secondaire large (export de données) ---- */
-.bouton-secondaire-large {
-  display: inline-block;
-  padding: 0.55rem 1.1rem;
-  border: 1.5px solid var(--color-primary, #1F4A4D);
-  color: var(--color-primary, #1F4A4D);
-  border-radius: 6px;
-  font-size: 0.88rem;
-  font-weight: 600;
-  text-decoration: none;
-  text-align: center;
-}
-
-.bouton-secondaire-large:hover {
-  background: rgba(31, 74, 77, 0.06);
-}
-
-/* ---- Bloc compte désactivé (page de connexion) ---- */
-.bloc-compte-desactive {
-  margin-top: 1rem;
-  padding: 1rem;
+.rbac-liste-roles {
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
   border-radius: 8px;
-  background: #fdeeee;
-  border: 1px solid #f0b8b8;
+  padding: 1rem;
+  align-self: start;
 }
 
-.bloc-compte-desactive p {
-  margin: 0 0 0.8rem 0;
+.rbac-nouveau-role {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.8rem;
+}
+
+.rbac-nouveau-role input {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--paper-line);
+  border-radius: 6px;
   font-size: 0.85rem;
-  color: #8a2b2b;
+  background: var(--carte-fond);
+  color: var(--text-dark);
 }
 
-.bloc-compte-desactive .bouton-secondaire-large {
+.rbac-roles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.rbac-roles li {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.rbac-role-item {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-dark);
+}
+
+.rbac-role-item:hover {
+  background: var(--paper);
+}
+
+.rbac-role-item--actif {
+  background: var(--brass);
+  color: #fff;
+}
+
+.rbac-role-item__compteur {
+  font-size: 0.72rem;
+  opacity: 0.75;
+}
+
+.rbac-role-supprimer {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0.3rem;
+  display: flex;
+}
+
+.rbac-role-supprimer:hover {
+  color: var(--danger);
+}
+
+.rbac-matrice-zone {
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
+  border-radius: 8px;
+  padding: 1.25rem;
+  overflow-x: auto;
+}
+
+.table-matrice {
+  border-collapse: collapse;
   width: 100%;
+  font-size: 0.85rem;
+}
+
+.table-matrice th,
+.table-matrice td {
+  padding: 0.55rem 0.8rem;
+  text-align: center;
+  border-bottom: 1px solid var(--paper-line);
+  white-space: nowrap;
+}
+
+.table-matrice__module {
+  text-align: left !important;
+  font-weight: 500;
+  text-transform: capitalize;
+  color: var(--text-dark);
+}
+
+.rbac-case {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid var(--paper-line);
+  background: var(--paper);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #fff;
+}
+
+.rbac-case--coche {
+  background: var(--brass);
+  border-color: var(--brass);
+}
+
+/* ---- Tableaux d'administration génériques (abonnements, etc.) ---- */
+
+.table-admin {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 0.88rem;
+}
+
+.table-admin th,
+.table-admin td {
+  padding: 0.7rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--paper-line);
+}
+
+.table-admin th {
+  background: var(--paper);
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.bouton-mini {
+  border: 1px solid var(--paper-line);
+  background: var(--carte-fond);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: var(--text-dark);
+}
+
+.bouton-mini--danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.badge-statut {
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.badge-statut--actif {
+  background: #dcf0ee;
+  color: var(--teal);
+}
+
+.badge-statut--suspendu {
+  background: #fbeae6;
+  color: var(--danger);
+}
+
+.info-message {
+  background: #e6f4ea;
+  border: 1px solid #b7dfc2;
+  color: #2f7a41;
+  font-size: 0.85rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 6px;
+  margin-bottom: 1.1rem;
 }

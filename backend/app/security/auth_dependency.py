@@ -36,7 +36,23 @@ def utilisateur_connecte(identifiants: HTTPAuthorizationCredentials = Depends(_s
 
 def exiger_role_admin(utilisateur: dict = Depends(utilisateur_connecte)) -> dict:
     """A utiliser sur les routes réservées à l'Administrateur de
-    l'entreprise (gestion des collaborateurs, des rôles...)."""
-    if utilisateur.get("role") not in ("Admin", "super_admin"):
+    l'entreprise (gestion des collaborateurs, des rôles...).
+
+    Ces routes travaillent toujours DANS la base d'une entreprise : elles
+    exigent donc un jeton de compte d'entreprise, qui porte le nom de
+    cette base (nomBase). Le Super Administrateur de la plateforme n'a
+    volontairement pas accès ici : conformément au cahier des charges, il
+    "n'accède jamais aux données métier des entreprises clientes" et ne
+    dispose d'aucune visibilité sur leurs données internes."""
+    if utilisateur.get("role") != "Admin":
         raise HTTPException(status_code=403, detail="Action réservée à l'administrateur de l'entreprise.")
+
+    if not utilisateur.get("nomBase"):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Ce compte n'est rattaché à aucun environnement d'entreprise. "
+                "Connectez-vous avec un compte Administrateur d'entreprise."
+            ),
+        )
     return utilisateur

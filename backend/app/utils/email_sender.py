@@ -33,3 +33,16 @@ def envoyer_code_otp(destinataire: str, code: str) -> None:
         f"— BENJEDDOU ERP"
     )
     envoyer_email(destinataire, sujet, corps)
+
+
+def envoyer_code_reinitialisation(destinataire: str, code: str) -> None:
+    sujet = "Réinitialisation de votre mot de passe — BENJEDDOU ERP"
+    corps = (
+        f"Bonjour,\n\n"
+        f"Voici votre code de vérification pour réinitialiser votre mot de passe : {code}\n\n"
+        f"Ce code expire dans 10 minutes. Ne le partagez avec personne.\n\n"
+        f"Si vous n'êtes pas à l'origine de cette demande, ignorez cet email : "
+        f"votre mot de passe actuel restera inchangé.\n\n"
+        f"— BENJEDDOU ERP"
+    )
+    envoyer_email(destinataire, sujet, corps)

@@ -1,0 +1,42 @@
+# docker-compose.override.yml
+#
+# Ce fichier est chargé AUTOMATIQUEMENT par Docker Compose en plus de
+# docker-compose.yml (aucune commande spéciale à taper).
+#
+# Pourquoi il est nécessaire : dans docker-compose.yml, les services
+# `frontend` et `backend` sont construits avec `build:` et ne montent
+# AUCUN volume. Le code est donc copié À L'INTÉRIEUR de l'image au moment
+# du build. Conséquence : modifier un fichier sur votre PC n'a strictement
+# aucun effet sur ce qui tourne, tant que l'image n'est pas reconstruite.
+# C'est ce qui explique qu'un Sidebar.jsx modifié et enregistré ne changeait
+# rien à l'écran.
+#
+# Ce fichier monte les dossiers de code dans les conteneurs pour que vos
+# modifications soient prises en compte immédiatement (rechargement à
+# chaud Vite côté frontend, --reload côté backend).
+#
+# À placer à la racine du projet, à côté de docker-compose.yml, puis :
+#     docker compose up -d --build
+#
+# NB : en production, ce fichier ne doit pas être déployé — il est fait
+# pour le développement uniquement.
+
+services:
+  frontend:
+    # Le dossier node_modules du conteneur est préservé (volume anonyme),
+    # sinon le montage du dossier local l'écraserait et casserait Vite.
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/index.html:/app/index.html
+      - ./frontend/vite.config.js:/app/vite.config.js
+      - /app/node_modules
+    environment:
+      # Nécessaire pour que Vite détecte les changements de fichiers
+      # depuis un montage Docker (sur Windows et macOS notamment).
+      CHOKIDAR_USEPOLLING: "true"
+
+  backend:
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/database:/app/database
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

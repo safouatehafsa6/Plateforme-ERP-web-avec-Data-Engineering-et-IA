@@ -4,7 +4,19 @@ export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:80
 
 export async function apiGet(endpoint) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`);
-  return res.json();
+  const data = await res.json().catch(() => null);
+
+  // Sans cette vérification, une erreur serveur (404, 500...) était
+  // silencieusement traitée comme une réponse valide : l'appelant
+  // recevait un objet sans les champs attendus et n'affichait rien,
+  // sans le moindre message d'erreur (cas du captcha resté vide).
+  if (!res.ok) {
+    const erreur = new Error(data?.message || `Erreur ${res.status} sur ${endpoint}.`);
+    erreur.data = data;
+    throw erreur;
+  }
+
+  return data;
 }
 
 export async function apiPost(endpoint, body) {

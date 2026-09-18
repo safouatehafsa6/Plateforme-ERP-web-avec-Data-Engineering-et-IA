@@ -1,24 +1,10 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
-import { Search, Bell, AlertTriangle } from "lucide-react";
+import { Search, Bell } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import KpiCard from "../components/KpiCard";
-import { API_BASE_URL } from "../api/config";
 
 export default function TableauDeBord() {
   const { t } = useTranslation();
-  const [essaiInfo, setEssaiInfo] = useState(null);
-  const [email, setEmail] = useState("");
-
-  useEffect(() => {
-    const brut = localStorage.getItem("essaiInfo");
-    if (brut) setEssaiInfo(JSON.parse(brut));
-    const emailStocke = localStorage.getItem("email");
-    if (emailStocke) setEmail(emailStocke);
-  }, []);
-
-  const visitesCritiques = essaiInfo && essaiInfo.visitesRestantes <= 5;
 
   return (
     <div className="app-layout">
@@ -37,44 +23,6 @@ export default function TableauDeBord() {
         </header>
 
         <main className="app-main">
-          {essaiInfo && !visitesCritiques && (
-            <div className="bandeau-essai">
-              <AlertTriangle size={16} strokeWidth={1.75} />
-              <span>
-                Visites restantes : <strong>{essaiInfo.visitesRestantes}</strong> / {essaiInfo.visitesMax}
-              </span>
-            </div>
-          )}
-
-          {essaiInfo && visitesCritiques && (
-            <div className="bandeau-essai bandeau-essai--critique">
-              <AlertTriangle size={18} strokeWidth={2} />
-              <div className="bandeau-essai--critique__contenu">
-                <p>
-                  <strong>Visites restantes : {essaiInfo.visitesRestantes} / {essaiInfo.visitesMax}.</strong>{" "}
-                  Votre période d'essai se termine bientôt. Souscrivez un
-                  abonnement dès maintenant pour continuer à utiliser la
-                  plateforme sans interruption. À l'expiration, votre compte
-                  sera désactivé et l'accès à votre espace sera bloqué —
-                  vos données resteront toutefois conservées et exportables.
-                </p>
-                <div className="bandeau-essai--critique__actions">
-                  <Link className="bouton-principal" to={`/abonnement?email=${encodeURIComponent(email)}`}>
-                    S'abonner maintenant
-                  </Link>
-                  <a
-                    className="bouton-secondaire-large"
-                    href={`${API_BASE_URL}/entreprises/export-donnees?email=${encodeURIComponent(email)}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Exporter toutes mes données
-                  </a>
-                </div>
-              </div>
-            </div>
-          )}
-
           <h1 className="app-main__titre">{t("tableau_de_bord")}</h1>
 
           <div className="kpi-grille">

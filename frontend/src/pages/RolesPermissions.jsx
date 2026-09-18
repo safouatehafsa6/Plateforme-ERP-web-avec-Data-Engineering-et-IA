@@ -1,253 +1,213 @@
 import { useEffect, useState } from "react";
-import { Search, Bell, Plus, Save } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { Check, Trash2, Plus } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import { API_BASE_URL } from "../api/config";
 
-function headersAuth() {
-  const token = localStorage.getItem("token");
-  return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-}
-
-const LABELS_ACTION = {
-  consultation: "Consultation",
-  creation: "Création",
-  modification: "Modification",
-  suppression: "Suppression",
-  validation: "Validation",
-  export: "Export",
+const LABELS_ACTIONS = {
+  consulter: "Consulter",
+  creer: "Créer",
+  modifier: "Modifier",
+  supprimer: "Supprimer",
+  valider: "Valider",
+  exporter: "Exporter",
 };
 
+function enTete(token) {
+  return { Authorization: `Bearer ${token}` };
+}
+
 export default function RolesPermissions() {
+  const { t } = useTranslation();
+  const token = localStorage.getItem("token");
+
   const [roles, setRoles] = useState([]);
-  const [permissions, setPermissions] = useState([]);
   const [roleSelectionne, setRoleSelectionne] = useState(null);
-  const [permissionsCochees, setPermissionsCochees] = useState(new Set());
+  const [matrice, setMatrice] = useState(null);
+  const [accordees, setAccordees] = useState(new Set());
   const [chargement, setChargement] = useState(true);
-  const [erreur, setErreur] = useState("");
-  const [message, setMessage] = useState("");
   const [enregistrement, setEnregistrement] = useState(false);
+  const [message, setMessage] = useState("");
+  const [nouveauNomRole, setNouveauNomRole] = useState("");
 
-  const [afficherFormulaireRole, setAfficherFormulaireRole] = useState(false);
-  const [nouveauRoleNom, setNouveauRoleNom] = useState("");
-
-  async function chargerDonnees() {
+  async function chargerRoles() {
     setChargement(true);
-    setErreur("");
     try {
-      const [resRoles, resPermissions] = await Promise.all([
-        fetch(`${API_BASE_URL}/roles`, { headers: headersAuth() }),
-        fetch(`${API_BASE_URL}/roles/permissions-disponibles`, { headers: headersAuth() }),
-      ]);
-      if (!resRoles.ok || !resPermissions.ok) throw new Error("Impossible de charger les rôles et permissions.");
-      const dataRoles = await resRoles.json();
-      const dataPermissions = await resPermissions.json();
-      setRoles(dataRoles.roles);
-      setPermissions(dataPermissions.permissions);
-      if (dataRoles.roles.length > 0) {
-        selectionnerRole(dataRoles.roles[0]);
+      const res = await fetch(`${API_BASE_URL}/roles`, { headers: enTete(token) });
+      if (!res.ok) throw new Error("Impossible de charger les rôles.");
+      const data = await res.json();
+      setRoles(data.roles || []);
+      if (data.roles?.length && !roleSelectionne) {
+        setRoleSelectionne(data.roles[0].id);
       }
-    } catch (e) {
-      setErreur(e.message);
+    } catch (err) {
+      setMessage(err.message);
     } finally {
       setChargement(false);
     }
   }
 
-  useEffect(() => {
-    chargerDonnees();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function selectionnerRole(role) {
-    setRoleSelectionne(role);
-    setPermissionsCochees(new Set(role.permissionIds));
-    setMessage("");
+  async function chargerMatrice(roleId) {
+    if (!roleId) return;
+    const res = await fetch(`${API_BASE_URL}/roles/${roleId}/permissions`, { headers: enTete(token) });
+    const data = await res.json();
+    setMatrice(data);
+    setAccordees(new Set(data.permissions.filter((p) => p.accordee).map((p) => p.id)));
   }
 
-  function basculerPermission(id) {
-    setPermissionsCochees((prev) => {
-      const suivant = new Set(prev);
-      if (suivant.has(id)) suivant.delete(id);
-      else suivant.add(id);
-      return suivant;
+  useEffect(() => { chargerRoles(); }, []);
+  useEffect(() => { chargerMatrice(roleSelectionne); }, [roleSelectionne]);
+
+  function basculer(permissionId) {
+    setAccordees((prec) => {
+      const copie = new Set(prec);
+      if (copie.has(permissionId)) copie.delete(permissionId);
+      else copie.add(permissionId);
+      return copie;
     });
   }
 
-  async function enregistrerPermissions() {
+  async function enregistrer() {
     setEnregistrement(true);
-    setErreur("");
     setMessage("");
     try {
-      const res = await fetch(`${API_BASE_URL}/roles/${roleSelectionne.id}/permissions`, {
+      await fetch(`${API_BASE_URL}/roles/${roleSelectionne}/permissions`, {
         method: "PUT",
-        headers: headersAuth(),
-        body: JSON.stringify({ permissionIds: Array.from(permissionsCochees) }),
+        headers: { ...enTete(token), "Content-Type": "application/json" },
+        body: JSON.stringify({ permissionIds: [...accordees] }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Erreur lors de l'enregistrement.");
-      setMessage("Permissions enregistrées avec succès.");
-      chargerDonnees();
-    } catch (e) {
-      setErreur(e.message);
+      setMessage(t("permissions_enregistrees"));
     } finally {
       setEnregistrement(false);
     }
   }
 
-  async function gererCreationRole(e) {
+  async function creerRole(e) {
     e.preventDefault();
-    setErreur("");
-    try {
-      const res = await fetch(`${API_BASE_URL}/roles`, {
-        method: "POST",
-        headers: headersAuth(),
-        body: JSON.stringify({ nom: nouveauRoleNom }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Erreur lors de la création du rôle.");
-      setNouveauRoleNom("");
-      setAfficherFormulaireRole(false);
-      chargerDonnees();
-    } catch (e) {
-      setErreur(e.message);
+    if (!nouveauNomRole.trim()) return;
+    const res = await fetch(`${API_BASE_URL}/roles`, {
+      method: "POST",
+      headers: { ...enTete(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ nom: nouveauNomRole }),
+    });
+    if (res.ok) {
+      setNouveauNomRole("");
+      await chargerRoles();
     }
   }
 
-  // Regroupe les permissions par module, pour construire les lignes de la matrice.
-  const modules = [...new Set(permissions.map((p) => p.module))];
-  const estRoleAdmin = roleSelectionne?.nom === "Admin";
+  async function supprimerRole(roleId) {
+    const res = await fetch(`${API_BASE_URL}/roles/${roleId}`, {
+      method: "DELETE",
+      headers: enTete(token),
+    });
+    if (res.ok) {
+      if (roleSelectionne === roleId) setRoleSelectionne(null);
+      chargerRoles();
+    } else {
+      const data = await res.json().catch(() => ({}));
+      setMessage(data.detail || t("erreur_suppression_role"));
+    }
+  }
 
   return (
     <div className="app-layout">
       <Sidebar />
-
       <div className="app-contenu">
         <header className="app-topbar">
-          <div className="app-topbar__recherche">
-            <Search size={16} strokeWidth={1.75} />
-            <input type="text" placeholder="Rechercher" />
-          </div>
-          <div className="app-topbar__droite">
-            <Bell size={18} strokeWidth={1.75} />
-            <div className="app-topbar__avatar">A</div>
-          </div>
+          <h1 className="app-main__titre" style={{ margin: 0 }}>{t("roles_permissions_titre")}</h1>
         </header>
-
         <main className="app-main">
-          <h1 className="app-main__titre">Rôles et permissions</h1>
+          <div className="rbac-mise-en-page">
+            <aside className="rbac-liste-roles">
+              <form onSubmit={creerRole} className="rbac-nouveau-role">
+                <input
+                  placeholder={t("nom_nouveau_role")}
+                  value={nouveauNomRole}
+                  onChange={(e) => setNouveauNomRole(e.target.value)}
+                />
+                <button type="submit" className="bouton-mini" aria-label={t("creer_role")}>
+                  <Plus size={15} />
+                </button>
+              </form>
 
-          {erreur && <div className="erreur-message">{erreur}</div>}
-          {message && <div className="succes-message">{message}</div>}
-
-          {chargement ? (
-            <p>Chargement...</p>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "220px 1fr", gap: "1.25rem" }}>
-              {/* Liste des rôles */}
-              <div className="panel">
-                <h3>Rôles</h3>
-                <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem" }}>
-                  {roles.map((role) => (
-                    <button
-                      key={role.id}
-                      onClick={() => selectionnerRole(role)}
-                      className="bouton-secondaire-large"
-                      style={{
-                        textAlign: "left",
-                        border: roleSelectionne?.id === role.id ? "2px solid var(--color-primary, #1F4A4D)" : "1px solid var(--paper-line, #ddd)",
-                      }}
-                    >
-                      {role.nom}
-                    </button>
-                  ))}
-                </div>
-
-                {afficherFormulaireRole ? (
-                  <form onSubmit={gererCreationRole} style={{ marginTop: "0.8rem" }}>
-                    <input
-                      value={nouveauRoleNom}
-                      onChange={(e) => setNouveauRoleNom(e.target.value)}
-                      placeholder="Nom du rôle"
-                      required
-                      style={{ width: "100%", marginBottom: "0.4rem" }}
-                    />
-                    <button className="bouton-principal" type="submit" style={{ width: "100%" }}>Créer</button>
-                  </form>
-                ) : (
-                  <button
-                    className="bouton-secondaire-large"
-                    style={{ marginTop: "0.8rem", width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.3rem" }}
-                    onClick={() => setAfficherFormulaireRole(true)}
-                  >
-                    <Plus size={14} /> Nouveau rôle
-                  </button>
-                )}
-              </div>
-
-              {/* Matrice de permissions */}
-              <div className="panel">
-                {roleSelectionne ? (
-                  <>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-                      <h3>Permissions — {roleSelectionne.nom}</h3>
-                      {!estRoleAdmin && (
+              {chargement ? (
+                <p>{t("chargement")}</p>
+              ) : (
+                <ul className="rbac-roles">
+                  {roles.map((r) => (
+                    <li key={r.id}>
+                      <button
+                        className={`rbac-role-item${roleSelectionne === r.id ? " rbac-role-item--actif" : ""}`}
+                        onClick={() => setRoleSelectionne(r.id)}
+                      >
+                        <span>{r.nom}</span>
+                        <span className="rbac-role-item__compteur">{r.nb_utilisateurs}</span>
+                      </button>
+                      {r.nom !== "Admin" && (
                         <button
-                          className="bouton-principal"
-                          style={{ width: "auto", display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
-                          onClick={enregistrerPermissions}
-                          disabled={enregistrement}
+                          className="rbac-role-supprimer"
+                          onClick={() => supprimerRole(r.id)}
+                          aria-label={t("supprimer_role")}
+                          title={t("supprimer_role")}
                         >
-                          <Save size={15} /> {enregistrement ? "..." : "Enregistrer"}
+                          <Trash2 size={14} />
                         </button>
                       )}
-                    </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </aside>
 
-                    {estRoleAdmin && (
-                      <p className="app-page-note">
-                        Le rôle Admin dispose de tous les droits par défaut et ne peut pas être restreint.
-                      </p>
-                    )}
+            <section className="rbac-matrice-zone">
+              {message && <div className="info-message">{message}</div>}
 
-                    <div className="table-module">
-                      <table>
-                        <thead>
-                          <tr>
-                            <th>Module</th>
-                            {Object.values(LABELS_ACTION).map((label) => (
-                              <th key={label} style={{ textAlign: "center" }}>{label}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {modules.map((module) => (
-                            <tr key={module}>
-                              <td style={{ textTransform: "capitalize", fontWeight: 600 }}>{module}</td>
-                              {Object.keys(LABELS_ACTION).map((action) => {
-                                const perm = permissions.find((p) => p.module === module && p.action === action);
-                                if (!perm) return <td key={action}></td>;
-                                return (
-                                  <td key={action} style={{ textAlign: "center" }}>
-                                    <input
-                                      type="checkbox"
-                                      disabled={estRoleAdmin}
-                                      checked={estRoleAdmin || permissionsCochees.has(perm.id)}
-                                      onChange={() => basculerPermission(perm.id)}
-                                    />
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </>
-                ) : (
-                  <p>Aucun rôle disponible.</p>
-                )}
-              </div>
-            </div>
-          )}
+              {matrice && (
+                <>
+                  <table className="table-matrice">
+                    <thead>
+                      <tr>
+                        <th>{t("colonne_module")}</th>
+                        {matrice.actions.map((a) => (
+                          <th key={a}>{LABELS_ACTIONS[a] || a}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matrice.modules.map((module) => (
+                        <tr key={module}>
+                          <td className="table-matrice__module">{module}</td>
+                          {matrice.actions.map((action) => {
+                            const perm = matrice.permissions.find((p) => p.module === module && p.action === action);
+                            if (!perm) return <td key={action}>—</td>;
+                            const coche = accordees.has(perm.id);
+                            return (
+                              <td key={action}>
+                                <button
+                                  type="button"
+                                  className={`rbac-case${coche ? " rbac-case--coche" : ""}`}
+                                  onClick={() => basculer(perm.id)}
+                                  aria-pressed={coche}
+                                  aria-label={`${module} — ${action}`}
+                                >
+                                  {coche && <Check size={13} strokeWidth={3} />}
+                                </button>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <button className="bouton-principal" style={{ marginTop: "1.2rem", maxWidth: "220px" }} onClick={enregistrer} disabled={enregistrement}>
+                    {enregistrement ? "..." : t("bouton_enregistrer")}
+                  </button>
+                </>
+              )}
+            </section>
+          </div>
         </main>
       </div>
     </div>

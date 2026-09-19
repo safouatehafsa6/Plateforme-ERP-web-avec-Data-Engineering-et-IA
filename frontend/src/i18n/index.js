@@ -139,6 +139,7 @@ const resources = {
       bouton_reactiver: "Réactiver",
 
       collaborateurs_titre: "Collaborateurs",
+      utilisateurs_externes_titre: "Utilisateurs Externes",
       roles_permissions_titre: "Rôles & Permissions",
       colonne_module: "Module",
       nom_nouveau_role: "Nom du nouveau rôle",
@@ -277,6 +278,7 @@ const resources = {
       bouton_reactiver: "Reactivate",
 
       collaborateurs_titre: "Team members",
+      utilisateurs_externes_titre: "External Users",
       roles_permissions_titre: "Roles & Permissions",
       colonne_module: "Module",
       nom_nouveau_role: "New role name",
@@ -415,6 +417,7 @@ const resources = {
       bouton_reactiver: "إعادة التفعيل",
 
       collaborateurs_titre: "المتعاونون",
+      utilisateurs_externes_titre: "المستخدمون الخارجيون",
       roles_permissions_titre: "الأدوار والصلاحيات",
       colonne_module: "الوحدة",
       nom_nouveau_role: "اسم الدور الجديد",

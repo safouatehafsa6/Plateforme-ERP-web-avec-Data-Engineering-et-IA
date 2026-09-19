@@ -92,7 +92,7 @@ async def login(payload: LoginPayload):
             ligne_index = None
             if not ligne_super_admin:
                 cur.execute(
-                    "SELECT entreprise_id, nom_base FROM compte_index WHERE email = %s",
+                    "SELECT entreprise_id, nom_base, type_compte FROM compte_index WHERE email = %s",
                     (email,),
                 )
                 ligne_index = cur.fetchone()
@@ -115,14 +115,14 @@ async def login(payload: LoginPayload):
         reinitialiser_tentatives(email)
         expiration = datetime.now(timezone.utc) + timedelta(hours=8)
         token = jwt.encode(
-            {"id": utilisateur_id, "email": email_bd, "role": "super_admin", "exp": expiration},
+            {"id": utilisateur_id, "email": email_bd, "role": "super_admin", "type": "plateforme", "exp": expiration},
             os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
             algorithm="HS256",
         )
         return {"token": token, "utilisateur": {"id": utilisateur_id, "nom": nom, "email": email_bd}}
 
     if ligne_index:
-        entreprise_id, nom_base = ligne_index
+        entreprise_id, nom_base, type_compte = ligne_index
 
         # L'abonnement doit être actif pour autoriser la connexion —
         # sinon, on bloque avant même d'atteindre la base de l'entreprise
@@ -141,44 +141,89 @@ async def login(payload: LoginPayload):
             })
 
         pool_tenant = get_pool_entreprise(nom_base)
-        conn = pool_tenant.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT u.id, u.nom, u.prenom, u.mot_de_passe, u.actif, r.nom AS role_nom
-                    FROM utilisateur u
-                    LEFT JOIN role r ON r.id = u.role_id
-                    WHERE u.email = %s
-                    """,
-                    (email,),
-                )
-                ligne_utilisateur = cur.fetchone()
-        finally:
-            pool_tenant.putconn(conn)
 
-        if ligne_utilisateur:
-            utilisateur_id, nom, prenom, hash_stocke, actif, role_nom = ligne_utilisateur
-            mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+        if type_compte == "externe":
+            # Compte du portail Utilisateurs externes (client/partenaire) :
+            # on vérifie dans utilisateur_externe, jamais dans utilisateur
+            # (isolation stricte entre collaborateurs internes et tiers).
+            conn = pool_tenant.getconn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT ue.id, ue.mot_de_passe, ue.actif, ue.client_id, c.nom AS client_nom
+                        FROM utilisateur_externe ue
+                        JOIN client c ON c.id = ue.client_id
+                        WHERE ue.email = %s
+                        """,
+                        (email,),
+                    )
+                    ligne_externe = cur.fetchone()
+            finally:
+                pool_tenant.putconn(conn)
 
-            if mot_de_passe_valide:
-                reinitialiser_tentatives(email)
-                expiration = datetime.now(timezone.utc) + timedelta(hours=8)
-                token = jwt.encode(
-                    {
-                        "id": utilisateur_id, "email": email, "role": role_nom or "Utilisateur",
-                        "nomBase": nom_base, "entrepriseId": entreprise_id, "exp": expiration,
-                    },
-                    os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
-                    algorithm="HS256",
-                )
-                return {
-                    "token": token,
-                    "utilisateur": {
-                        "id": utilisateur_id, "nom": f"{prenom} {nom}".strip(), "email": email,
-                        "role": role_nom, "entrepriseId": entreprise_id,
-                    },
-                }
+            if ligne_externe:
+                utilisateur_id, hash_stocke, actif, client_id, client_nom = ligne_externe
+                mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+
+                if mot_de_passe_valide:
+                    reinitialiser_tentatives(email)
+                    expiration = datetime.now(timezone.utc) + timedelta(hours=8)
+                    token = jwt.encode(
+                        {
+                            "id": utilisateur_id, "email": email, "role": "Utilisateur", "type": "externe",
+                            "nomBase": nom_base, "entrepriseId": entreprise_id, "clientId": client_id,
+                            "exp": expiration,
+                        },
+                        os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+                        algorithm="HS256",
+                    )
+                    return {
+                        "token": token,
+                        "utilisateur": {
+                            "id": utilisateur_id, "nom": client_nom, "email": email,
+                            "role": "Utilisateur", "type": "externe",
+                        },
+                    }
+        else:
+            conn = pool_tenant.getconn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT u.id, u.nom, u.prenom, u.mot_de_passe, u.actif, r.nom AS role_nom
+                        FROM utilisateur u
+                        LEFT JOIN role r ON r.id = u.role_id
+                        WHERE u.email = %s
+                        """,
+                        (email,),
+                    )
+                    ligne_utilisateur = cur.fetchone()
+            finally:
+                pool_tenant.putconn(conn)
+
+            if ligne_utilisateur:
+                utilisateur_id, nom, prenom, hash_stocke, actif, role_nom = ligne_utilisateur
+                mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+
+                if mot_de_passe_valide:
+                    reinitialiser_tentatives(email)
+                    expiration = datetime.now(timezone.utc) + timedelta(hours=8)
+                    token = jwt.encode(
+                        {
+                            "id": utilisateur_id, "email": email, "role": role_nom or "Utilisateur", "type": "interne",
+                            "nomBase": nom_base, "entrepriseId": entreprise_id, "exp": expiration,
+                        },
+                        os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+                        algorithm="HS256",
+                    )
+                    return {
+                        "token": token,
+                        "utilisateur": {
+                            "id": utilisateur_id, "nom": f"{prenom} {nom}".strip(), "email": email,
+                            "role": role_nom, "entrepriseId": entreprise_id,
+                        },
+                    }
 
     # Ni super_admin, ni compte d'entreprise valide : même message
     # générique dans tous les cas (anti-énumération).

@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.db import get_pool_entreprise
-from app.security.auth_dependency import exiger_role_admin, exiger_permission
+from app.security.auth_dependency import exiger_role_admin
 from app.services.provisioning import indexer_compte_central
 
 router = APIRouter(prefix="/api/utilisateurs", tags=["utilisateurs"])
@@ -28,7 +28,7 @@ class NouvelUtilisateurPayload(BaseModel):
 
 
 @router.get("")
-def lister_utilisateurs(utilisateur=Depends(exiger_permission("utilisateurs", "consultation"))):
+def lister_utilisateurs(utilisateur=Depends(exiger_role_admin)):
     """Liste tous les collaborateurs de l'entreprise de l'administrateur
     connecté — jamais ceux d'une autre entreprise, grâce au routage vers
     sa base dédiée (nomBase, contenu dans son jeton)."""
@@ -72,7 +72,7 @@ def lister_roles(utilisateur=Depends(exiger_role_admin)):
 
 
 @router.post("")
-def creer_utilisateur(payload: NouvelUtilisateurPayload, utilisateur=Depends(exiger_permission("utilisateurs", "creation"))):
+def creer_utilisateur(payload: NouvelUtilisateurPayload, utilisateur=Depends(exiger_role_admin)):
     """
     Crée un nouveau collaborateur avec un mot de passe initial généré
     aléatoirement. Le mot de passe temporaire est renvoyé UNE SEULE FOIS

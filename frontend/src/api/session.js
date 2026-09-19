@@ -35,6 +35,10 @@ export function estAdminEntreprise(session) {
   return Boolean(session && session.nomBase && session.role === "Admin");
 }
 
+export function estUtilisateurExterne(session) {
+  return Boolean(session && session.type === "externe");
+}
+
 export function estSuperAdmin(session) {
   return Boolean(session && session.role === "super_admin");
 }

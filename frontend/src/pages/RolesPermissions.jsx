@@ -34,7 +34,13 @@ export default function RolesPermissions() {
     setChargement(true);
     try {
       const res = await fetch(`${API_BASE_URL}/roles`, { headers: enTete(token) });
-      if (!res.ok) throw new Error("Impossible de charger les rôles.");
+      if (!res.ok) {
+        // Affiche le vrai message du backend (ex. "compte non rattaché à
+        // une entreprise") au lieu d'un message générique qui masquait la
+        // cause réelle.
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.detail || data?.message || `Impossible de charger les rôles (${res.status}).`);
+      }
       const data = await res.json();
       setRoles(data.roles || []);
       if (data.roles?.length && !roleSelectionne) {
@@ -161,7 +167,7 @@ export default function RolesPermissions() {
             </aside>
 
             <section className="rbac-matrice-zone">
-              {message && <div className="info-message">{message}</div>}
+              {message && <div className="erreur-message">{message}</div>}
 
               {matrice && (
                 <>

@@ -1233,6 +1233,115 @@ a {
   color: var(--danger);
 }
 
+/* Panneau de formulaire inline (ex. "Nouveau collaborateur") — classe
+   utilisée par Collaborateurs.jsx et UtilisateursExternes.jsx mais
+   jusqu'ici jamais définie : le formulaire s'affichait sans aucun style. */
+.panel {
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
+  border-radius: 8px;
+  padding: 1.2rem 1.4rem;
+}
+
+.panel h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.05rem;
+}
+
+.table-module {
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.table-module table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.table-module th,
+.table-module td {
+  padding: 0.7rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--paper-line);
+}
+
+.table-module th {
+  background: var(--paper);
+  font-weight: 600;
+  color: var(--text-dark);
+}
+
+.table-module tr:last-child td {
+  border-bottom: none;
+}
+
+.bouton-secondaire-large {
+  background: none;
+  border: 1px solid var(--paper-line);
+  color: var(--text-dark);
+  border-radius: 6px;
+  padding: 0.75rem 1.1rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.bouton-secondaire-large:hover {
+  background: var(--paper);
+}
+
+/* Portail Utilisateurs externes : en-tête minimal, sans la Sidebar ERP
+   (un client/partenaire ne doit voir que son propre espace). */
+.portail-layout {
+  min-height: 100vh;
+  background: var(--paper);
+}
+
+.portail-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background: var(--ink);
+  color: var(--texte-sur-sombre);
+}
+
+.portail-topbar__marque {
+  font-family: "Fraunces", serif;
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.portail-topbar__deconnexion {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.3);
+  color: inherit;
+  border-radius: 6px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.portail-main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 3rem;
+}
+
+.portail-carte {
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
+  border-radius: 10px;
+  padding: 1.4rem 1.6rem;
+  margin-bottom: 1.5rem;
+}
+
 .info-message {
   background: #e6f4ea;
   border: 1px solid #b7dfc2;

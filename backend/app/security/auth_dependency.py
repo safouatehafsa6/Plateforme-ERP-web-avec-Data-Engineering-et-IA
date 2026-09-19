@@ -58,52 +58,18 @@ def exiger_role_admin(utilisateur: dict = Depends(utilisateur_connecte)) -> dict
     return utilisateur
 
 
-def exiger_permission(module: str, action: str):
-    """
-    Fabrique une dépendance FastAPI qui vérifie que le rôle de
-    l'utilisateur connecté possède bien la permission (module, action)
-    demandée — ferme la boucle du moteur RBAC : un rôle non-Admin sans
-    cette permission précise reçoit un refus d'accès (403), même s'il
-    possède un jeton JWT valide par ailleurs.
+def exiger_utilisateur_externe(utilisateur: dict = Depends(utilisateur_connecte)) -> dict:
+    """A utiliser sur les routes du portail Utilisateurs externes (mes
+    documents, mes factures...).
 
-    Le rôle "Admin" garde toujours tous les droits (cohérent avec la
-    règle déjà appliquée dans roles_permissions.py : ses permissions ne
-    sont jamais modifiables).
-
-    Utilisation :
-        @router.delete("/utilisateurs/{id}")
-        def supprimer(id: int, utilisateur=Depends(exiger_permission("utilisateurs", "suppression"))):
-            ...
-    """
-    from app.db import get_pool_entreprise  # import différé : évite un cycle avec auth_dependency
-
-    def verificateur(utilisateur: dict = Depends(utilisateur_connecte)) -> dict:
-        if utilisateur.get("role") in ("Admin", "super_admin"):
-            return utilisateur
-
-        pool_tenant = get_pool_entreprise(utilisateur["nomBase"])
-        conn = pool_tenant.getconn()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT 1
-                    FROM role_permission rp
-                    JOIN role r ON r.id = rp.role_id
-                    JOIN permission p ON p.id = rp.permission_id
-                    WHERE r.nom = %s AND p.module = %s AND p.action = %s
-                    """,
-                    (utilisateur.get("role"), module, action),
-                )
-                autorise = cur.fetchone() is not None
-        finally:
-            pool_tenant.putconn(conn)
-
-        if not autorise:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Votre rôle ne dispose pas de la permission '{action}' sur le module '{module}'.",
-            )
-        return utilisateur
-
-    return verificateur
+    Distinct de exiger_role_admin : ici on exige au contraire un compte
+    externe (type == "externe"), jamais un collaborateur interne ni le
+    Super Administrateur — l'isolation entre "gérer l'entreprise" et
+    "consulter sa propre relation commerciale avec elle" doit rester
+    stricte, dans les deux sens."""
+    if utilisateur.get("type") != "externe" or not utilisateur.get("clientId"):
+        raise HTTPException(
+            status_code=403,
+            detail="Ce compte n'est pas un compte du portail Utilisateurs externes.",
+        )
+    return utilisateur

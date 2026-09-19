@@ -1,7 +1,7 @@
 import { useLocation, Link, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, ShoppingCart, Truck, Boxes, Users,
-  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck,
+  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { lireSession, estAdminEntreprise, estSuperAdmin } from "../api/session";
@@ -23,6 +23,7 @@ const ITEMS = [
   { icon: Wallet, label: "comptabilite", chemin: "#" },
   { icon: UserCog, label: "collaborateurs_titre", chemin: "/collaborateurs", visible: estAdminEntreprise },
   { icon: ShieldCheck, label: "roles_permissions_titre", chemin: "/roles-permissions", visible: estAdminEntreprise },
+  { icon: Contact, label: "utilisateurs_externes_titre", chemin: "/utilisateurs-externes", visible: estAdminEntreprise },
   { icon: CreditCard, label: "admin_abonnements_titre", chemin: "/admin/abonnements", visible: estSuperAdmin },
 ];
 

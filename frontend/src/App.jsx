@@ -9,6 +9,8 @@ import TableauDeBord from "./pages/TableauDeBord";
 import AdminAbonnements from "./pages/AdminAbonnements";
 import Collaborateurs from "./pages/Collaborateurs";
 import RolesPermissions from "./pages/RolesPermissions";
+import UtilisateursExternes from "./pages/UtilisateursExternes";
+import PortailAccueil from "./pages/PortailAccueil";
 
 // Le Header est rendu une seule fois ici, en dehors des <Routes> :
 // il reste donc affiché en continu quelle que soit la page consultée,
@@ -27,6 +29,8 @@ export default function App() {
             <Route path="/admin/abonnements" element={<AdminAbonnements />} />
             <Route path="/collaborateurs" element={<Collaborateurs />} />
             <Route path="/roles-permissions" element={<RolesPermissions />} />
+            <Route path="/utilisateurs-externes" element={<UtilisateursExternes />} />
+            <Route path="/portail" element={<PortailAccueil />} />
           </Routes>
         </LangueProvider>
       </ThemeProvider>

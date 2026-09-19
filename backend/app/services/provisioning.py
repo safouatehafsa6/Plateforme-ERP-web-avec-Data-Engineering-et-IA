@@ -12,7 +12,11 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "erp_password")
 # (utilisateurs, rôles, clients, produits, commandes...).
 DOSSIER_TEMPLATE = os.path.join(os.path.dirname(__file__), "..", "..", "database", "tenant-template")
 
-CHEMIN_SCHEMA_ENTREPRISE = os.path.join(DOSSIER_TEMPLATE, "001_init_schema_entreprise.sql")
+# Scripts de STRUCTURE (tables), appliqués dans cet ordre à l'initialisation.
+SCRIPTS_SCHEMA_ENTREPRISE = [
+    os.path.join(DOSSIER_TEMPLATE, "001_init_schema_entreprise.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "009_utilisateurs_externes.sql"),
+]
 
 # Scripts appliqués APRÈS la création du schéma, dans cet ordre. Ils
 # préparent le moteur RBAC de la nouvelle entreprise : sans eux, la base
@@ -47,18 +51,18 @@ def creer_base_entreprise(nom_base: str) -> None:
 
 
 def initialiser_schema_entreprise(nom_base: str) -> None:
-    """Étape 2 : exécuter le script SQL qui crée toutes les tables
-    (utilisateur, rôle, client, produit, commande...) dans cette nouvelle
-    base, à partir du même script utilisé en développement."""
-    with open(CHEMIN_SCHEMA_ENTREPRISE, "r", encoding="utf-8") as f:
-        script_sql = f.read()
-
+    """Étape 2 : exécuter les scripts SQL qui créent toutes les tables
+    (utilisateur, rôle, client, produit, commande, utilisateur_externe...)
+    dans cette nouvelle base, à partir des mêmes scripts utilisés en
+    développement."""
     conn = psycopg2.connect(
         host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=nom_base
     )
     try:
         with conn.cursor() as cur:
-            cur.execute(script_sql)
+            for chemin in SCRIPTS_SCHEMA_ENTREPRISE:
+                with open(chemin, "r", encoding="utf-8") as f:
+                    cur.execute(f.read())
         conn.commit()
     finally:
         conn.close()
@@ -109,26 +113,33 @@ def appliquer_seed_rbac(nom_base: str) -> None:
         conn.close()
 
 
-def indexer_compte_central(email: str, entreprise_id: int, nom_base: str) -> None:
+def indexer_compte_central(email: str, entreprise_id: int, nom_base: str, type_compte: str = "interne") -> None:
     """Enregistre (ou met à jour) dans la base centrale la correspondance
     email -> entreprise, indispensable au point d'entrée unique de
     connexion : à la saisie de son email, le backend doit pouvoir
     retrouver dans QUELLE base entreprise chercher le compte, sans que
     l'utilisateur ait à le préciser lui-même (voir diagramme de séquence
     'Routage multi-tenant'). N'indexe jamais le mot de passe — celui-ci
-    reste uniquement dans la base entreprise elle-même."""
+    reste uniquement dans la base entreprise elle-même.
+
+    type_compte distingue un compte interne (Admin/collaborateur, table
+    utilisateur) d'un compte externe (client/partenaire du portail, table
+    utilisateur_externe) : le login lit cette valeur pour savoir dans
+    quelle table chercher, sans avoir à interroger les deux à chaque
+    tentative de connexion."""
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO compte_index (email, entreprise_id, nom_base)
-                VALUES (%s, %s, %s)
+                INSERT INTO compte_index (email, entreprise_id, nom_base, type_compte)
+                VALUES (%s, %s, %s, %s)
                 ON CONFLICT (email) DO UPDATE
                     SET entreprise_id = EXCLUDED.entreprise_id,
-                        nom_base = EXCLUDED.nom_base
+                        nom_base = EXCLUDED.nom_base,
+                        type_compte = EXCLUDED.type_compte
                 """,
-                (email.strip().lower(), entreprise_id, nom_base),
+                (email.strip().lower(), entreprise_id, nom_base, type_compte),
             )
         conn.commit()
     finally:

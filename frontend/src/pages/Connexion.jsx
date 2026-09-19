@@ -6,6 +6,7 @@ import { apiPost } from "../api/config";
 import ReseauDecoratif from "../components/ReseauDecoratif";
 import CaptchaLocal from "../components/CaptchaLocal";
 import ChampMotDePasse from "../components/ChampMotDePasse";
+import { estUtilisateurExterne, lireSession } from "../api/session";
 
 // Clé de TEST officielle de Google reCAPTCHA v2 (case à cocher) : elle
 // valide toujours la vérification, pratique en développement. Avant la
@@ -50,7 +51,10 @@ export default function Connexion() {
 
       const data = await apiPost("/auth/login", corps);
       localStorage.setItem("token", data.token);
-      navigate("/dashboard");
+      // Le portail Utilisateurs externes a sa propre interface, distincte
+      // du tableau de bord ERP — on redirige selon le type de compte
+      // détecté dans le jeton, jamais deviné côté frontend.
+      navigate(estUtilisateurExterne(lireSession()) ? "/portail" : "/dashboard");
     } catch (err) {
       const infos = err.data || {};
       setErreur(infos.message || t("erreur_identifiants"));

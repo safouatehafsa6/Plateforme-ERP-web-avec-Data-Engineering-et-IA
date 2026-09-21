@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut } from "lucide-react";
+import { LogOut, Download, CreditCard } from "lucide-react";
 import { API_BASE_URL } from "../api/config";
 
 function headersAuth() {
@@ -18,9 +18,9 @@ function formatDate(valeur) {
 }
 
 // Espace personnel du portail Utilisateurs externes (clients/partenaires) :
-// consultation en temps réel de ses propres commandes et factures.
-// Le téléchargement PDF avec QR code et le paiement en ligne mentionnés
-// dans la lettre de cadrage sont une prochaine étape, non couverts ici.
+// consultation en temps réel de ses propres commandes et factures,
+// téléchargement PDF avec QR code d'authenticité, et paiement en ligne
+// (simulé — voir portail.py pour le détail de cette limitation).
 export default function PortailAccueil() {
   const navigate = useNavigate();
   const [profil, setProfil] = useState(null);
@@ -28,31 +28,76 @@ export default function PortailAccueil() {
   const [factures, setFactures] = useState([]);
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState("");
+  const [messageSucces, setMessageSucces] = useState("");
+  const [actionEnCours, setActionEnCours] = useState(null); // id de la facture en cours de traitement
+
+  async function chargerDocuments() {
+    setChargement(true);
+    setErreur("");
+    try {
+      const [resProfil, resDocuments] = await Promise.all([
+        fetch(`${API_BASE_URL}/portail/moi`, { headers: headersAuth() }),
+        fetch(`${API_BASE_URL}/portail/mes-documents`, { headers: headersAuth() }),
+      ]);
+      if (!resProfil.ok || !resDocuments.ok) {
+        throw new Error("Impossible de charger votre espace. Merci de vous reconnecter.");
+      }
+      setProfil(await resProfil.json());
+      const documents = await resDocuments.json();
+      setCommandes(documents.commandes);
+      setFactures(documents.factures);
+    } catch (e) {
+      setErreur(e.message);
+    } finally {
+      setChargement(false);
+    }
+  }
 
   useEffect(() => {
-    async function charger() {
-      setChargement(true);
-      setErreur("");
-      try {
-        const [resProfil, resDocuments] = await Promise.all([
-          fetch(`${API_BASE_URL}/portail/moi`, { headers: headersAuth() }),
-          fetch(`${API_BASE_URL}/portail/mes-documents`, { headers: headersAuth() }),
-        ]);
-        if (!resProfil.ok || !resDocuments.ok) {
-          throw new Error("Impossible de charger votre espace. Merci de vous reconnecter.");
-        }
-        setProfil(await resProfil.json());
-        const documents = await resDocuments.json();
-        setCommandes(documents.commandes);
-        setFactures(documents.factures);
-      } catch (e) {
-        setErreur(e.message);
-      } finally {
-        setChargement(false);
-      }
-    }
-    charger();
+    chargerDocuments();
   }, []);
+
+  async function telechargerPdf(facture) {
+    setErreur("");
+    setActionEnCours(facture.id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/portail/factures/${facture.id}/pdf`, { headers: headersAuth() });
+      if (!res.ok) throw new Error("Impossible de générer le PDF de cette facture.");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const lien = document.createElement("a");
+      lien.href = url;
+      lien.download = `facture_${facture.numero}.pdf`;
+      document.body.appendChild(lien);
+      lien.click();
+      lien.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      setErreur(e.message);
+    } finally {
+      setActionEnCours(null);
+    }
+  }
+
+  async function payerFacture(facture) {
+    setErreur("");
+    setMessageSucces("");
+    setActionEnCours(facture.id);
+    try {
+      const res = await fetch(`${API_BASE_URL}/portail/factures/${facture.id}/payer`, {
+        method: "POST",
+        headers: headersAuth(),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Le paiement a échoué.");
+      setMessageSucces(data.message);
+      await chargerDocuments();
+    } catch (e) {
+      setErreur(e.message);
+    } finally {
+      setActionEnCours(null);
+    }
+  }
 
   function deconnexion() {
     localStorage.removeItem("token");
@@ -70,6 +115,7 @@ export default function PortailAccueil() {
 
       <main className="portail-main">
         {erreur && <div className="erreur-message">{erreur}</div>}
+        {messageSucces && <div className="succes-message">{messageSucces}</div>}
 
         {!chargement && profil && (
           <div className="portail-carte">
@@ -119,6 +165,7 @@ export default function PortailAccueil() {
                       <th>Date</th>
                       <th>Statut</th>
                       <th>Montant</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -132,10 +179,30 @@ export default function PortailAccueil() {
                           </span>
                         </td>
                         <td>{formatMontant(f.montant_total)}</td>
+                        <td style={{ display: "flex", gap: "0.5rem" }}>
+                          <button
+                            className="bouton-mini"
+                            disabled={actionEnCours === f.id}
+                            onClick={() => telechargerPdf(f)}
+                            title="Télécharger le PDF (avec QR code d'authenticité)"
+                          >
+                            <Download size={14} strokeWidth={2} /> PDF
+                          </button>
+                          {f.statut !== "payee" && (
+                            <button
+                              className="bouton-mini"
+                              disabled={actionEnCours === f.id}
+                              onClick={() => payerFacture(f)}
+                              title="Payer cette facture (paiement simulé)"
+                            >
+                              <CreditCard size={14} strokeWidth={2} /> {actionEnCours === f.id ? "..." : "Payer"}
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                     {factures.length === 0 && (
-                      <tr><td colSpan={4}>Aucune facture pour le moment.</td></tr>
+                      <tr><td colSpan={5}>Aucune facture pour le moment.</td></tr>
                     )}
                   </tbody>
                 </table>

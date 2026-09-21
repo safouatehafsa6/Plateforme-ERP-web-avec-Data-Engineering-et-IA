@@ -11,6 +11,7 @@ import Collaborateurs from "./pages/Collaborateurs";
 import RolesPermissions from "./pages/RolesPermissions";
 import UtilisateursExternes from "./pages/UtilisateursExternes";
 import PortailAccueil from "./pages/PortailAccueil";
+import VerificationDocument from "./pages/VerificationDocument";
 
 // Le Header est rendu une seule fois ici, en dehors des <Routes> :
 // il reste donc affiché en continu quelle que soit la page consultée,
@@ -31,6 +32,7 @@ export default function App() {
             <Route path="/roles-permissions" element={<RolesPermissions />} />
             <Route path="/utilisateurs-externes" element={<UtilisateursExternes />} />
             <Route path="/portail" element={<PortailAccueil />} />
+            <Route path="/verifier/:nomBase/:code" element={<VerificationDocument />} />
           </Routes>
         </LangueProvider>
       </ThemeProvider>

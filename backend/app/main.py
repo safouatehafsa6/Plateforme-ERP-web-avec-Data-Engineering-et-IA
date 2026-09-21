@@ -3,7 +3,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail
+from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification
 
 app = FastAPI(title="ERP Backend", version="0.1.0")
 
@@ -21,6 +21,7 @@ app.include_router(utilisateurs.router)
 app.include_router(roles.router)
 app.include_router(utilisateurs_externes.router)
 app.include_router(portail.router)
+app.include_router(verification.router)
 
 
 @app.get("/api/health")

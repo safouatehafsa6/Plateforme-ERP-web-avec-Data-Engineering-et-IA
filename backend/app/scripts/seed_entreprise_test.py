@@ -9,7 +9,10 @@ Le parcours normal d'inscription (captcha -> OTP par email -> KYC ->
 abonnement -> paiement) est indispensable en production, mais lourd à
 refaire à chaque test. Ce script reproduit le résultat final de ce
 parcours directement en base, pour pouvoir tester la connexion d'un
-Administrateur Client et les pages Collaborateurs / Rôles & Permissions.
+Administrateur Client, les pages Collaborateurs / Rôles & Permissions,
+et le portail Utilisateurs externes (un client de démo est créé avec
+une commande et une facture, pour tester tout de suite le téléchargement
+PDF/QR code et le paiement en ligne).
 
 RÉSERVÉ AU DÉVELOPPEMENT — ne jamais exécuter en production : il
 court-circuite volontairement toutes les vérifications d'inscription.
@@ -28,15 +31,17 @@ n'écrase rien.
 """
 
 import argparse
+import os
 import secrets
 import sys
 from datetime import datetime, timezone
 
 import bcrypt
+import psycopg2
 
 from app.db import pool_central
 from app.routers.entreprises import _slugifier, CGU_VERSION_ACTUELLE
-from app.services.provisioning import provisionner_entreprise
+from app.services.provisioning import provisionner_entreprise, indexer_compte_central
 
 NOM_PAR_DEFAUT = "Societe Test"
 EMAIL_PAR_DEFAUT = "admin@societe-test.ma"
@@ -102,6 +107,49 @@ def creer_entreprise_test(nom: str, email: str, mot_de_passe: str) -> None:
     print(f"Provisioning de la base « {nom_base} »...")
     provisionner_entreprise(nom_base, nom, email, mot_de_passe_hash, entreprise_id)
 
+    # 4. Client de test + compte du portail Utilisateurs externes, avec une
+    #    commande et une facture, pour pouvoir tester tout de suite le
+    #    téléchargement PDF/QR code et le paiement en ligne sans avoir à
+    #    passer par les modules Ventes (pas encore construits).
+    email_client = "client@societe-test.ma"
+    mot_de_passe_client = "Client1234!"
+    mot_de_passe_client_hash = bcrypt.hashpw(mot_de_passe_client.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+    pool_tenant = psycopg2.connect(
+        host=os.getenv("DB_HOST", "localhost"), port=os.getenv("DB_PORT", "5432"),
+        user=os.getenv("DB_USER", "erp_user"), password=os.getenv("DB_PASSWORD", "erp_password"),
+        dbname=nom_base,
+    )
+    try:
+        with pool_tenant.cursor() as cur:
+            cur.execute(
+                "INSERT INTO client (nom, email, telephone) VALUES (%s, %s, %s) RETURNING id",
+                ("Client Démo", email_client, "0600000001"),
+            )
+            client_id = cur.fetchone()[0]
+
+            cur.execute(
+                "INSERT INTO commande (client_id, statut, montant_total) VALUES (%s, 'confirmee', %s) RETURNING id",
+                (client_id, 1250.00),
+            )
+            commande_id = cur.fetchone()[0]
+
+            cur.execute(
+                """INSERT INTO facture (commande_id, numero, montant_total, statut)
+                   VALUES (%s, %s, %s, 'impayee')""",
+                (commande_id, f"FAC-{identifiant_unique}-001", 1250.00),
+            )
+
+            cur.execute(
+                "INSERT INTO utilisateur_externe (client_id, email, mot_de_passe, actif) VALUES (%s, %s, %s, TRUE)",
+                (client_id, email_client, mot_de_passe_client_hash),
+            )
+        pool_tenant.commit()
+    finally:
+        pool_tenant.close()
+
+    indexer_compte_central(email_client, entreprise_id, nom_base, type_compte="externe")
+
     print()
     print("=" * 62)
     print("ENTREPRISE DE TEST CRÉÉE ET ACTIVÉE")
@@ -113,8 +161,13 @@ def creer_entreprise_test(nom: str, email: str, mot_de_passe: str) -> None:
     print(f"    Email       : {email}")
     print(f"    Mot de passe: {mot_de_passe}")
     print()
-    print("  Une fois connectée, la barre latérale doit afficher")
-    print("  « Collaborateurs » et « Rôles & Permissions ».")
+    print("  Connexion Portail Utilisateurs externes (compte client de démo) :")
+    print(f"    Email       : {email_client}")
+    print(f"    Mot de passe: {mot_de_passe_client}")
+    print(f"    -> 1 commande confirmée + 1 facture impayée déjà créées pour ce client.")
+    print()
+    print("  Une fois connectée en Admin, la barre latérale doit afficher")
+    print("  « Collaborateurs », « Rôles & Permissions » et « Utilisateurs Externes ».")
     print("=" * 62)
 
 

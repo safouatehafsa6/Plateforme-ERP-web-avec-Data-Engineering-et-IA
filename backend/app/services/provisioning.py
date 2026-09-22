@@ -16,6 +16,7 @@ DOSSIER_TEMPLATE = os.path.join(os.path.dirname(__file__), "..", "..", "database
 SCRIPTS_SCHEMA_ENTREPRISE = [
     os.path.join(DOSSIER_TEMPLATE, "001_init_schema_entreprise.sql"),
     os.path.join(DOSSIER_TEMPLATE, "009_utilisateurs_externes.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "010_code_verification_facture.sql"),
 ]
 
 # Scripts appliqués APRÈS la création du schéma, dans cet ordre. Ils

@@ -15,12 +15,13 @@ import { lireSession, estAdminEntreprise, estSuperAdmin } from "../api/session";
 // plateforme, réservée au Super Administrateur.
 const ITEMS = [
   { icon: LayoutDashboard, label: "tableau_de_bord", chemin: "/dashboard" },
-  { icon: ShoppingCart, label: "ventes", chemin: "#" },
-  { icon: Truck, label: "achats", chemin: "#" },
-  { icon: Boxes, label: "stock", chemin: "#" },
-  { icon: Users, label: "clients", chemin: "#" },
-  { icon: FileText, label: "facturation", chemin: "#" },
-  { icon: Wallet, label: "comptabilite", chemin: "#" },
+  { icon: ShoppingCart, label: "ventes", chemin: "/ventes" },
+  { icon: Truck, label: "achats", chemin: "/achats" },
+  { icon: Truck, label: "fournisseurs", chemin: "/fournisseurs" },
+  { icon: Boxes, label: "stock", chemin: "/stock" },
+  { icon: Users, label: "clients", chemin: "/clients" },
+  { icon: FileText, label: "facturation", chemin: "/facturation" },
+  { icon: Wallet, label: "comptabilite", chemin: "/comptabilite" },
   { icon: UserCog, label: "collaborateurs_titre", chemin: "/collaborateurs", visible: estAdminEntreprise },
   { icon: ShieldCheck, label: "roles_permissions_titre", chemin: "/roles-permissions", visible: estAdminEntreprise },
   { icon: Contact, label: "utilisateurs_externes_titre", chemin: "/utilisateurs-externes", visible: estAdminEntreprise },
@@ -33,7 +34,12 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const session = lireSession();
 
-  const items = ITEMS.filter(({ visible }) => !visible || visible(session));
+  let featureState = {};
+  try { featureState = JSON.parse(localStorage.getItem("erp_features") || "{}"); } catch {}
+  const items = ITEMS.filter(({ visible, label }) => {
+    if (visible && !visible(session)) return false;
+    return featureState[label] !== false;
+  });
 
   function deconnexion(e) {
     e.preventDefault();
@@ -59,10 +65,13 @@ export default function Sidebar() {
       </nav>
 
       <div className="app-sidebar__bas">
-        <a href="#" className="app-sidebar__item">
+        <Link
+          to="/parametres"
+          className={`app-sidebar__item${location.pathname === "/parametres" ? " app-sidebar__item--actif" : ""}`}
+        >
           <Settings size={18} strokeWidth={1.75} />
           <span>{t("parametres")}</span>
-        </a>
+        </Link>
         <a href="#" className="app-sidebar__item" onClick={deconnexion}>
           <LogOut size={18} strokeWidth={1.75} />
           <span>{t("deconnexion")}</span>

@@ -1351,3 +1351,114 @@ a {
   border-radius: 6px;
   margin-bottom: 1.1rem;
 }
+
+/* ===== Module métier Ventes ===== */
+.ventes-entete { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+.ventes-sous-titre { margin:-.45rem 0 0; color:var(--text-muted); font-size:.9rem; }
+.ventes-btn-auto { width:auto; display:inline-flex; align-items:center; gap:.45rem; }
+.ventes-tabs { display:flex; gap:.35rem; margin-bottom:1rem; border-bottom:1px solid var(--paper-line); overflow-x:auto; }
+.ventes-tabs button { border:0; background:transparent; padding:.75rem .95rem; cursor:pointer; color:var(--text-muted); font-weight:600; border-bottom:2px solid transparent; white-space:nowrap; }
+.ventes-tabs button.actif { color:var(--teal); border-bottom-color:var(--teal); }
+.ventes-tabs span { margin-left:.45rem; background:var(--paper); border:1px solid var(--paper-line); border-radius:999px; padding:.05rem .4rem; font-size:.73rem; }
+.ventes-form { margin-bottom:1rem; }
+.ventes-form__entete, .ventes-lignes__titre, .ventes-form__pied { display:flex; justify-content:space-between; align-items:center; gap:1rem; }
+.ventes-form__entete h3 { margin:0 0 1rem; }
+.ventes-form__pied { margin-top:1rem; }
+.ventes-form__pied > div { display:flex; gap:.55rem; }
+.ventes-lignes { margin:1rem 0; }
+.ventes-lignes__titre { margin-bottom:.45rem; }
+.ventes-ligne { display:grid; grid-template-columns:minmax(220px,2fr) 80px 110px 95px 125px 34px; gap:.45rem; align-items:center; margin-bottom:.45rem; }
+.ventes-ligne select, .ventes-ligne input, .ventes-form textarea { width:100%; border:1px solid var(--paper-line); border-radius:6px; background:var(--carte-fond); color:var(--text-dark); padding:.65rem .7rem; box-sizing:border-box; }
+.ventes-ligne strong { text-align:right; font-size:.85rem; }
+.ventes-btn-lien, .ventes-actions button { display:inline-flex; align-items:center; gap:.25rem; border:1px solid var(--paper-line); background:var(--carte-fond); color:var(--text-dark); border-radius:5px; padding:.4rem .6rem; cursor:pointer; font-size:.78rem; }
+.ventes-btn-lien { border:0; color:var(--teal); padding:.2rem; }
+.ventes-actions { display:flex; flex-wrap:wrap; gap:.35rem; }
+.ventes-actions button:hover { background:var(--paper); }
+.ventes-icon-btn { border:0; background:transparent; color:var(--text-muted); cursor:pointer; padding:.3rem; display:inline-flex; }
+.ventes-icon-btn:disabled { opacity:.3; cursor:not-allowed; }
+.ventes-badge { display:inline-flex; border-radius:999px; padding:.22rem .5rem; font-size:.72rem; font-weight:600; background:var(--paper); border:1px solid var(--paper-line); text-transform:capitalize; }
+.ventes-badge--accepte, .ventes-badge--livree, .ventes-badge--payee { background:#dcf0ee; color:var(--teal); border-color:transparent; }
+.ventes-badge--refuse, .ventes-badge--annule, .ventes-badge--annulee { background:#fbeae6; color:var(--danger); border-color:transparent; }
+.ventes-badge--envoye, .ventes-badge--confirmee, .ventes-badge--expedie { background:#eef2fb; color:#385b9c; border-color:transparent; }
+.ventes-muted { color:var(--text-muted); font-size:.8rem; }
+.ventes-table { overflow-x:auto; }
+.ventes-table table { min-width:900px; }
+
+@media (max-width: 900px) {
+  .ventes-ligne { grid-template-columns:1fr 1fr; padding:.7rem; border:1px solid var(--paper-line); border-radius:6px; }
+  .ventes-ligne select { grid-column:1/-1; }
+  .ventes-entete { flex-direction:column; }
+  .ventes-form__pied { align-items:flex-start; flex-direction:column; }
+}
+
+/* ===== Module métier Achats ===== */
+.achats-entete { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+.achats-sous-titre { margin:-.45rem 0 0; color:var(--text-muted); font-size:.9rem; }
+.achats-btn-auto { width:auto; display:inline-flex; align-items:center; gap:.45rem; }
+.achats-tabs { display:flex; gap:.35rem; margin-bottom:1rem; border-bottom:1px solid var(--paper-line); overflow-x:auto; }
+.achats-tabs button { border:0; background:transparent; padding:.75rem .95rem; cursor:pointer; color:var(--text-muted); font-weight:600; border-bottom:2px solid transparent; white-space:nowrap; }
+.achats-tabs button.actif { color:var(--teal); border-bottom-color:var(--teal); }
+.achats-tabs span { margin-left:.45rem; background:var(--paper); border:1px solid var(--paper-line); border-radius:999px; padding:.05rem .4rem; font-size:.73rem; }
+.achats-form { margin-bottom:1rem; }
+.achats-form__entete, .achats-lignes__titre, .achats-form__pied { display:flex; justify-content:space-between; align-items:center; gap:1rem; }
+.achats-form__entete h3 { margin:0 0 1rem; }
+.achats-form__pied { margin-top:1rem; }
+.achats-form__pied > div { display:flex; gap:.55rem; }
+.achats-form select, .achats-form textarea { width:100%; border:1px solid var(--paper-line); border-radius:6px; background:var(--carte-fond); color:var(--text-dark); padding:.65rem .7rem; box-sizing:border-box; }
+.achats-lignes { margin:1rem 0; }
+.achats-lignes__titre { margin-bottom:.45rem; }
+.achats-ligne { display:grid; grid-template-columns:minmax(220px,2fr) 90px 125px 130px 34px; gap:.45rem; align-items:center; margin-bottom:.45rem; }
+.achats-ligne select, .achats-ligne input { width:100%; border:1px solid var(--paper-line); border-radius:6px; background:var(--carte-fond); color:var(--text-dark); padding:.65rem .7rem; box-sizing:border-box; }
+.achats-ligne strong { text-align:right; font-size:.85rem; }
+.achats-btn-lien, .achats-actions button { display:inline-flex; align-items:center; gap:.25rem; border:1px solid var(--paper-line); background:var(--carte-fond); color:var(--text-dark); border-radius:5px; padding:.4rem .6rem; cursor:pointer; font-size:.78rem; }
+.achats-btn-lien { border:0; color:var(--teal); padding:.2rem; }
+.achats-actions { display:flex; flex-wrap:wrap; gap:.35rem; }
+.achats-actions button:hover { background:var(--paper); }
+.achats-icon-btn { border:0; background:transparent; color:var(--text-muted); cursor:pointer; padding:.3rem; display:inline-flex; }
+.achats-icon-btn:disabled { opacity:.3; cursor:not-allowed; }
+.achats-badge { display:inline-flex; border-radius:999px; padding:.22rem .5rem; font-size:.72rem; font-weight:600; background:var(--paper); border:1px solid var(--paper-line); text-transform:capitalize; }
+.achats-badge--soumise, .achats-badge--commande, .achats-badge--reception-partielle { background:#eef2fb; color:#385b9c; border-color:transparent; }
+.achats-badge--receptionnee, .achats-badge--convertie { background:#dcf0ee; color:var(--teal); border-color:transparent; }
+.achats-badge--annulee { background:#fbeae6; color:var(--danger); border-color:transparent; }
+.achats-muted { color:var(--text-muted); font-size:.8rem; }
+.achats-table { overflow-x:auto; }
+.achats-table table { min-width:900px; }
+.achats-reception-lignes { margin:1rem 0; display:grid; gap:.5rem; }
+.achats-reception-ligne { display:flex; align-items:center; justify-content:space-between; gap:1rem; border:1px solid var(--paper-line); border-radius:7px; padding:.7rem; }
+.achats-reception-ligne span { display:flex; flex-direction:column; gap:.15rem; }
+.achats-reception-ligne small { color:var(--text-muted); }
+.achats-reception-ligne input { width:110px; border:1px solid var(--paper-line); border-radius:6px; padding:.6rem; background:var(--carte-fond); color:var(--text-dark); }
+
+@media (max-width: 900px) {
+  .achats-ligne { grid-template-columns:1fr 1fr; padding:.7rem; border:1px solid var(--paper-line); border-radius:6px; }
+  .achats-ligne select { grid-column:1/-1; }
+  .achats-entete { flex-direction:column; }
+  .achats-form__pied { align-items:flex-start; flex-direction:column; }
+}
+
+.achats-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 760px) {
+  .achats-form-grid { grid-template-columns: 1fr; }
+}
+
+
+/* ===== Paramètres / activation des fonctionnalités ===== */
+.parametres-page { max-width: 1100px; }
+.parametres-page .page-head h1 { display:flex; align-items:center; gap:.5rem; }
+.parametres-page .page-head p { color:var(--text-muted); margin-top:.25rem; }
+.parametres-section { margin-bottom:1rem; padding:1.1rem; }
+.parametres-section__title { display:flex; align-items:center; gap:.55rem; margin-bottom:.8rem; }
+.parametres-section__title h2 { margin:0; font-size:1rem; }
+.parametres-grid { display:grid; grid-template-columns:minmax(240px,420px); gap:.8rem; }
+.parametres-grid label { display:flex; flex-direction:column; gap:.4rem; font-weight:600; }
+.parametres-grid select { border:1px solid var(--paper-line); border-radius:6px; padding:.65rem .7rem; background:var(--carte-fond); color:var(--text-dark); }
+.parametres-muted { color:var(--text-muted); font-size:.85rem; }
+.parametres-features { display:grid; grid-template-columns:repeat(2,minmax(220px,1fr)); gap:.6rem; }
+.parametres-feature { display:flex; align-items:center; justify-content:space-between; border:1px solid var(--paper-line); background:var(--carte-fond); color:var(--text-dark); border-radius:7px; padding:.75rem .9rem; cursor:pointer; }
+.parametres-feature:hover { background:var(--paper); }
+@media (max-width:760px) { .parametres-features { grid-template-columns:1fr; } }

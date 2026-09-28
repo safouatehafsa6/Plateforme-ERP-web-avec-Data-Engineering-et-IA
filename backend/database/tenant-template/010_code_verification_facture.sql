@@ -22,14 +22,3 @@ ALTER TABLE facture
 UPDATE facture
 SET code_verification = encode(gen_random_bytes(24), 'hex')
 WHERE code_verification IS NULL;
-
--- Colonne de reserve pour mettre en cache le QR code lui-meme (ex: en
--- base64 ou en URL d'image), si on veut un jour eviter de le regenerer
--- a chaque telechargement de PDF. A ce jour, generer_pdf_facture()
--- (backend/app/utils/pdf_facture.py) reconstruit le QR a la volee a
--- partir de code_verification et ne lit/n'ecrit PAS encore cette
--- colonne — elle est ajoutee ici uniquement pour que le schema soit
--- identique sur toutes les bases entreprise, en prevision de cette
--- optimisation future.
-ALTER TABLE facture
-    ADD COLUMN IF NOT EXISTS qr_code TEXT;

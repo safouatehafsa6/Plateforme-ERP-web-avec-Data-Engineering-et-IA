@@ -1,10 +1,12 @@
 import { useLocation, Link, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import {
   LayoutDashboard, ShoppingCart, Truck, Boxes, Users,
-  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact,
+  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { lireSession, estAdminEntreprise, estSuperAdmin } from "../api/session";
+import AssistantIA from "./AssistantIA";
 
 // `visible` décide si l'entrée apparaît selon le profil connecté.
 // Par défaut (pas de `visible`), l'entrée est toujours affichée.
@@ -33,6 +35,7 @@ export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const session = lireSession();
+  const [assistantOuvert, setAssistantOuvert] = useState(false);
 
   let featureState = {};
   try { featureState = JSON.parse(localStorage.getItem("erp_features") || "{}"); } catch {}
@@ -63,6 +66,14 @@ export default function Sidebar() {
           </Link>
         ))}
       </nav>
+
+      <div className="app-sidebar__assistant-wrap">
+        <button type="button" className={`app-sidebar__item app-sidebar__assistant-trigger${assistantOuvert ? " app-sidebar__item--actif" : ""}`} onClick={() => setAssistantOuvert((v) => !v)} aria-expanded={assistantOuvert}>
+          <Bot size={18} strokeWidth={1.75} />
+          <span>{t("assistant_ia")}</span>
+        </button>
+        <AssistantIA open={assistantOuvert} onClose={() => setAssistantOuvert(false)} />
+      </div>
 
       <div className="app-sidebar__bas">
         <Link

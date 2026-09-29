@@ -149,6 +149,7 @@ const resources = {
       erreur_suppression_role: "Impossible de supprimer ce rôle.",
       bouton_enregistrer: "Enregistrer",
       permissions_enregistrees: "Permissions enregistrées.",
+      assistant_ia: "Assistant IA",
     },
   },
   en: {
@@ -289,6 +290,7 @@ const resources = {
       erreur_suppression_role: "Unable to delete this role.",
       bouton_enregistrer: "Save",
       permissions_enregistrees: "Permissions saved.",
+      assistant_ia: "AI Assistant",
     },
   },
   ar: {
@@ -429,6 +431,7 @@ const resources = {
       erreur_suppression_role: "تعذر حذف هذا الدور.",
       bouton_enregistrer: "حفظ",
       permissions_enregistrees: "تم حفظ الصلاحيات.",
+      assistant_ia: "مساعد الذكاء الاصطناعي",
     },
   },
 };

@@ -18,9 +18,9 @@ function getModule(pathname) {
 }
 
 const TEXTES = {
-  fr: { title:"Assistant IA", placeholder:"Écrivez votre question…", clear:"Effacer", close:"Fermer", send:"Envoyer", welcome:"Bonjour ! Je peux vous guider dans l’ERP et adapter mon aide au module actuel.", context:"Contexte", suggestions:["Comment utiliser ce module ?","Que puis-je faire ici ?"] },
-  en: { title:"AI Assistant", placeholder:"Write your question…", clear:"Clear", close:"Close", send:"Send", welcome:"Hello! I can guide you through the ERP and adapt my help to the current module.", context:"Context", suggestions:["How do I use this module?","What can I do here?"] },
-  ar: { title:"مساعد الذكاء الاصطناعي", placeholder:"اكتب سؤالك…", clear:"مسح", close:"إغلاق", send:"إرسال", welcome:"مرحباً! يمكنني إرشادك داخل منصة ERP وتكييف المساعدة حسب الوحدة الحالية.", context:"السياق", suggestions:["كيف أستخدم هذه الوحدة؟","ماذا يمكنني أن أفعل هنا؟"] },
+  fr: { title:"Assistant IA", placeholder:"Écrivez votre question…", clear:"Effacer", close:"Fermer", send:"Envoyer", welcome:"Bonjour ! Je peux vous guider dans l’ERP et adapter mon aide au module actuel.", context:"Contexte", suggestions:["Créer une commande","Synthèse des ventes","Produits les plus vendus","Top clients"] },
+  en: { title:"AI Assistant", placeholder:"Write your question…", clear:"Clear", close:"Close", send:"Send", welcome:"Hello! I can guide you through the ERP and adapt my help to the current module.", context:"Context", suggestions:["Create an order","Sales summary","Top products","Top customers"] },
+  ar: { title:"مساعد الذكاء الاصطناعي", placeholder:"اكتب سؤالك…", clear:"مسح", close:"إغلاق", send:"إرسال", welcome:"مرحباً! يمكنني إرشادك داخل منصة ERP وتكييف المساعدة حسب الوحدة الحالية.", context:"السياق", suggestions:["إنشاء طلب","ملخص المبيعات","أكثر المنتجات مبيعاً","أفضل العملاء"] },
 };
 
 export default function AssistantIA({ open, onClose }) {
@@ -30,6 +30,8 @@ export default function AssistantIA({ open, onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  const [state, setState] = useState({ operation: null, step: null, data: {} });
   const module = useMemo(() => getModule(location.pathname), [location.pathname]);
   const ui = TEXTES[langue];
   const rtl = langue === "ar";
@@ -49,8 +51,12 @@ export default function AssistantIA({ open, onClose }) {
     setMessages((m) => [...m, { role:"user", text:question }]);
     setInput(""); setSending(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/assistant/chat`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${localStorage.getItem("token")}` }, body:JSON.stringify({ message:question, langue, module }) });
+      const res = await fetch(`${API_BASE_URL}/assistant/chat`, { method:"POST", headers:{ "Content-Type":"application/json", Authorization:`Bearer ${localStorage.getItem("token")}` }, body:JSON.stringify({ message:question, langue, module, state }) });
       const data = await res.json().catch(() => ({}));
+
+      if (data.state) {
+        setState(data.state);
+      }
       if (!res.ok) throw new Error(data.detail || "assistant_error");
       setMessages((m) => [...m, { role:"assistant", text:data.reply }]);
     } catch (err) {
@@ -59,7 +65,7 @@ export default function AssistantIA({ open, onClose }) {
     } finally { setSending(false); }
   }
 
-  function effacer() { setMessages([]); }
+  function effacer() { setMessages([]); setState({ operation: null, step: null, data: {} }); }
   if (!open) return null;
 
   return <section className={`assistant-panel${rtl ? " assistant-panel--rtl" : ""}`} dir={rtl ? "rtl" : "ltr"} aria-label={ui.title}>

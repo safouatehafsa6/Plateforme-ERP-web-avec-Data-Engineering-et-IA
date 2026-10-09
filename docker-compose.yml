@@ -17,6 +17,8 @@ volumes:
   pg_erp_data:
   pg_airflow_data:
   minio_data:
+  spark-client:
+    name: spark-client
 
 services:
   # ------------------------------------------------------------------------
@@ -190,7 +192,9 @@ services:
 
   # Interface web Airflow : http://localhost:8080  (admin / admin)
   airflow-webserver:
-    image: apache/airflow:2.9.3
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
     container_name: airflow-webserver
     restart: unless-stopped
     depends_on:
@@ -201,6 +205,8 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - spark-client:/opt/spark
+      - ./data-engineering/spark-jobs:/opt/spark/jobs
     ports:
       - "8080:8080"
     command: webserver
@@ -208,7 +214,9 @@ services:
       - erp-network
 
   airflow-scheduler:
-    image: apache/airflow:2.9.3
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
     container_name: airflow-scheduler
     restart: unless-stopped
     depends_on:
@@ -219,16 +227,16 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - spark-client:/opt/spark
+      - ./data-engineering/spark-jobs:/opt/spark/jobs
     command: scheduler
     networks:
       - erp-network
-
-  # ------------------------------------------------------------------------
-  # TRAITEMENT DISTRIBUE (Spark)
-  # Interface web du master : http://localhost:8081
-  # ------------------------------------------------------------------------
   spark-master:
-    image: apache/spark:3.5.3
+    build:
+      context: .
+      dockerfile: ./data-engineering/docker/Dockerfile.spark
+    image: erp-spark:3.5.3-postgres
     container_name: spark-master
     restart: unless-stopped
     command: >
@@ -237,11 +245,16 @@ services:
     ports:
       - "7077:7077"
       - "8081:8080"
+    volumes:
+      - ./data-engineering/spark-jobs:/opt/spark/jobs
     networks:
       - erp-network
 
   spark-worker:
-    image: apache/spark:3.5.3
+    build:
+      context: .
+      dockerfile: ./data-engineering/docker/Dockerfile.spark
+    image: erp-spark:3.5.3-postgres
     container_name: spark-worker
     restart: unless-stopped
     depends_on:
@@ -249,9 +262,10 @@ services:
     command: >
       /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
       spark://spark-master:7077 --memory 2G --cores 2
+    volumes:
+      - ./data-engineering/spark-jobs:/opt/spark/jobs
     networks:
       - erp-network
-
 # ==========================================================================
 # NOTE IMPORTANTE - avant le premier "docker compose up -d" :
 #
@@ -277,3 +291,11 @@ services:
 # 3. Creez un fichier .env a la racine (copie de .env.example) avant de
 #    lancer, pour ne pas dependre des valeurs par defaut en dur.
 # ==========================================================================
+
+
+
+
+
+
+
+

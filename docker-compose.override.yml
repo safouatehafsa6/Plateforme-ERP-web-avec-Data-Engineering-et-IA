@@ -1,42 +1,255 @@
-# docker-compose.override.yml
-#
-# Ce fichier est chargé AUTOMATIQUEMENT par Docker Compose en plus de
-# docker-compose.yml (aucune commande spéciale à taper).
-#
-# Pourquoi il est nécessaire : dans docker-compose.yml, les services
-# `frontend` et `backend` sont construits avec `build:` et ne montent
-# AUCUN volume. Le code est donc copié À L'INTÉRIEUR de l'image au moment
-# du build. Conséquence : modifier un fichier sur votre PC n'a strictement
-# aucun effet sur ce qui tourne, tant que l'image n'est pas reconstruite.
-# C'est ce qui explique qu'un Sidebar.jsx modifié et enregistré ne changeait
-# rien à l'écran.
-#
-# Ce fichier monte les dossiers de code dans les conteneurs pour que vos
-# modifications soient prises en compte immédiatement (rechargement à
-# chaud Vite côté frontend, --reload côté backend).
-#
-# À placer à la racine du projet, à côté de docker-compose.yml, puis :
-#     docker compose up -d --build
-#
-# NB : en production, ce fichier ne doit pas être déployé — il est fait
-# pour le développement uniquement.
+
+version: "3.9"
+
+networks:
+  erp-network:
+    driver: bridge
+
+volumes:
+  pg_erp_data:
+  pg_airflow_data:
+  minio_data:
+  metabase_data:
 
 services:
+  # Base de donnees ERP
+  postgres-erp:
+    image: postgres:16
+    container_name: postgres-erp
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${ERP_DB_USER:-erp_user}
+      POSTGRES_PASSWORD: ${ERP_DB_PASSWORD:-erp_password}
+      POSTGRES_DB: ${ERP_DB_NAME:-erp_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_erp_data:/var/lib/postgresql/data
+      - ./backend/database/central:/docker-entrypoint-initdb.d
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ERP_DB_USER:-erp_user} -d ${ERP_DB_NAME:-erp_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Backend API
+  backend:
+    build: ./backend
+    container_name: erp-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      postgres-erp:
+        condition: service_healthy
+      mailpit:
+        condition: service_started
+    environment:
+      DB_HOST: postgres-erp
+      DB_PORT: 5432
+      DB_USER: ${ERP_DB_USER:-erp_user}
+      DB_PASSWORD: ${ERP_DB_PASSWORD:-erp_password}
+      DB_CENTRAL_NAME: ${ERP_DB_NAME:-erp_db}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: no-reply@erp-plateforme.exemple
+    ports:
+      - "8000:8000"
+    networks:
+      - erp-network
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/database:/app/database
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Mailpit - emails de developpement
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - erp-network
+
+  # Frontend Web
   frontend:
-    # Le dossier node_modules du conteneur est préservé (volume anonyme),
-    # sinon le montage du dossier local l'écraserait et casserait Vite.
+    build: ./frontend
+    container_name: erp-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    networks:
+      - erp-network
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/index.html:/app/index.html
       - ./frontend/vite.config.js:/app/vite.config.js
       - /app/node_modules
     environment:
-      # Nécessaire pour que Vite détecte les changements de fichiers
-      # depuis un montage Docker (sur Windows et macOS notamment).
       CHOKIDAR_USEPOLLING: "true"
 
-  backend:
+  # MinIO - Data Lake / stockage objet
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_password}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     volumes:
-      - ./backend/app:/app/app
-      - ./backend/database:/app/database
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+      - minio_data:/data
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Initialisation des buckets MinIO
+  minio-init:
+    image: minio/mc:latest
+    container_name: minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - erp-network
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minio_admin} ${MINIO_ROOT_PASSWORD:-minio_password};
+      mc mb -p local/raw;
+      mc mb -p local/staging;
+      mc mb -p local/curated;
+      exit 0;
+      "
+
+  # Base de donnees Airflow
+  postgres-airflow:
+    image: postgres:16
+    container_name: postgres-airflow
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - pg_airflow_data:/var/lib/postgresql/data
+    networks:
+      - erp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Initialisation Airflow
+  airflow-init:
+    image: apache/airflow:2.9.3
+    container_name: airflow-init
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+    entrypoint: >
+      /bin/bash -c "
+      airflow db migrate &&
+      airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+      "
+    networks:
+      - erp-network
+
+  # Interface Web Airflow
+  airflow-webserver:
+    image: apache/airflow:2.9.3
+    container_name: airflow-webserver
+    restart: unless-stopped
+    depends_on:
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    ports:
+      - "8080:8080"
+    command: webserver
+    networks:
+      - erp-network
+
+  # Planificateur Airflow
+  airflow-scheduler:
+    image: apache/airflow:2.9.3
+    container_name: airflow-scheduler
+    restart: unless-stopped
+    depends_on:
+      - airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    command: scheduler
+    networks:
+      - erp-network
+
+  # Spark Master
+  spark-master:
+    image: apache/spark:3.5.3
+    container_name: spark-master
+    restart: unless-stopped
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+      --host spark-master --port 7077 --webui-port 8080
+    ports:
+      - "7077:7077"
+      - "8081:8080"
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    networks:
+      - erp-network
+
+  # Spark Worker
+  spark-worker:
+    image: apache/spark:3.5.3
+    container_name: spark-worker
+    restart: unless-stopped
+    depends_on:
+      - spark-master
+    command: >
+      /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker
+      spark://spark-master:7077 --memory 2G --cores 2
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+    networks:
+      - erp-network
+
+  # Metabase - BI et tableaux de bord du projet ERP
+  metabase:
+    image: metabase/metabase:latest
+    container_name: erp-metabase
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    volumes:
+      - metabase_data:/metabase-data
+    environment:
+      MB_DB_FILE: /metabase-data/metabase.db
+    networks:
+      - erp-network

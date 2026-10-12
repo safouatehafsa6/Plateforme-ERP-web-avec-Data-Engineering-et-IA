@@ -1,0 +1,357 @@
+
+import base64
+import json
+import re
+import tempfile
+from datetime import date, datetime, time
+from decimal import Decimal
+from pathlib import Path
+from uuid import UUID
+
+import psycopg2
+from psycopg2 import sql
+from psycopg2.extras import RealDictCursor
+from dotenv import dotenv_values
+from minio import Minio
+
+
+# --------------------------------------------------
+# Configuration
+# --------------------------------------------------
+
+ROOT = Path(__file__).resolve().parents[2]
+config = dotenv_values(ROOT / ".env")
+
+COMPANIES = [
+    {
+        "company_id": 3,
+        "database": "compte_societe_test_ec11a6c3",
+    },
+    {
+        "company_id": 4,
+        "database": "compte_benjjedou_2061bc82",
+    },
+    {
+        "company_id": 5,
+        "database": "compte_demo_qr_897caff5",
+    },
+]
+
+BUCKET = "raw"
+BATCH_SIZE = 1000
+
+minio_client = Minio(
+    "localhost:9000",
+    access_key=config["MINIO_ROOT_USER"],
+    secret_key=config["MINIO_ROOT_PASSWORD"],
+    secure=False,
+)
+
+
+# Exclude likely credentials, tokens and verification secrets.
+# Review this list against your actual ERP schema.
+SENSITIVE_COLUMN_PATTERN = re.compile(
+    r"(^|_)(password|passwd|secret|token|"
+    r"api_key|private_key|code_verification|"
+    r"verification_code|reset_token)(_|$)",
+    re.IGNORECASE,
+)
+
+
+# --------------------------------------------------
+# JSON serialization
+# --------------------------------------------------
+
+def json_default(value):
+    if isinstance(value, (datetime, date, time)):
+        return value.isoformat()
+
+    if isinstance(value, Decimal):
+        return str(value)
+
+    if isinstance(value, UUID):
+        return str(value)
+
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
+
+    raise TypeError(
+        f"Unsupported type: {type(value).__name__}"
+    )
+
+
+# --------------------------------------------------
+# PostgreSQL connection
+# --------------------------------------------------
+
+def connect_database(company):
+    required = ["ERP_DB_USER", "ERP_DB_PASSWORD"]
+
+    missing = [
+        key for key in required
+        if not config.get(key)
+    ]
+
+    if missing:
+        raise RuntimeError(
+            f"Missing .env configuration: {', '.join(missing)}"
+        )
+
+    return psycopg2.connect(
+        host="localhost",
+        port=5432,
+        dbname=company["database"],
+        user=config["ERP_DB_USER"],
+        password=config["ERP_DB_PASSWORD"],
+        connect_timeout=10,
+        options="-c default_transaction_read_only=on",
+    )
+
+
+# --------------------------------------------------
+# Discover all application tables
+# --------------------------------------------------
+
+def discover_tables(conn):
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_type = 'BASE TABLE'
+              AND table_schema NOT IN (
+                  'information_schema',
+                  'pg_catalog'
+              )
+              AND table_schema NOT LIKE 'pg_toast%%'
+            ORDER BY table_schema, table_name
+        """)
+
+        return cursor.fetchall()
+
+
+# --------------------------------------------------
+# Discover columns, excluding sensitive fields
+# --------------------------------------------------
+
+def discover_columns(conn, schema, table):
+    with conn.cursor() as cursor:
+        cursor.execute("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s
+              AND table_name = %s
+            ORDER BY ordinal_position
+        """, (schema, table))
+
+        columns = [
+            row[0] for row in cursor.fetchall()
+        ]
+
+    excluded = [
+        column for column in columns
+        if SENSITIVE_COLUMN_PATTERN.search(column)
+    ]
+
+    included = [
+        column for column in columns
+        if not SENSITIVE_COLUMN_PATTERN.search(column)
+    ]
+
+    return included, excluded
+
+
+# --------------------------------------------------
+# Extract one table and upload its JSONL file
+# --------------------------------------------------
+
+def extract_table(conn, company, schema, table, run_id):
+    columns, excluded = discover_columns(
+        conn, schema, table
+    )
+
+    if excluded:
+        print(
+            f"  Sensitive columns excluded: {excluded}"
+        )
+
+    if not columns:
+        print(
+            f"  SKIPPED {schema}.{table}: "
+            "no exportable columns"
+        )
+        return None
+
+    query = sql.SQL("SELECT {} FROM {}").format(
+        sql.SQL(", ").join(
+            sql.Identifier(column) for column in columns
+        ),
+        sql.Identifier(schema, table),
+    )
+
+    # A temporary file avoids keeping the whole table in RAM.
+    # Large files can spill to disk.
+    with tempfile.SpooledTemporaryFile(
+        max_size=8 * 1024 * 1024,
+        mode="w+b",
+    ) as output:
+
+        row_count = 0
+
+        with conn.cursor(
+            name="extract_cursor",
+            cursor_factory=RealDictCursor,
+        ) as cursor:
+            cursor.itersize = BATCH_SIZE
+            cursor.execute(query)
+
+            while True:
+                batch = cursor.fetchmany(BATCH_SIZE)
+
+                if not batch:
+                    break
+
+                for row in batch:
+                    record = dict(row)
+
+                    # Preserve the source company and table.
+                    record["_source"] = {
+                        "company_id": company["company_id"],
+                        "database": company["database"],
+                        "schema": schema,
+                        "table": table,
+                    }
+
+                    line = json.dumps(
+                        record,
+                        default=json_default,
+                        ensure_ascii=False,
+                    )
+
+                    output.write(
+                        (line + "\n").encode("utf-8")
+                    )
+
+                    row_count += 1
+
+        size = output.tell()
+        output.seek(0)
+
+        object_name = (
+            f"company_{company['company_id']}/"
+            f"{schema}/{table}/"
+            f"{table}_{run_id}.jsonl"
+        )
+
+        minio_client.put_object(
+            bucket_name=BUCKET,
+            object_name=object_name,
+            data=output,
+            length=size,
+            content_type="application/x-ndjson",
+            part_size=10 * 1024 * 1024,
+        )
+
+    print(
+        f"  OK | {schema}.{table} | "
+        f"rows={row_count} | bytes={size}"
+    )
+
+    print(f"  MinIO: {BUCKET}/{object_name}")
+
+    return {
+        "table": f"{schema}.{table}",
+        "rows": row_count,
+        "object": object_name,
+    }
+
+
+# --------------------------------------------------
+# Main extraction
+# --------------------------------------------------
+
+def main():
+    if not minio_client.bucket_exists(BUCKET):
+        raise RuntimeError(
+            f"MinIO bucket '{BUCKET}' does not exist"
+        )
+
+    run_id = datetime.now().strftime(
+        "%Y%m%dT%H%M%S"
+    )
+
+    total_tables = 0
+    total_rows = 0
+    errors = []
+
+    for company in COMPANIES:
+        print("\n" + "=" * 65)
+        print(
+            f"Company {company['company_id']} | "
+            f"Database: {company['database']}"
+        )
+        print("=" * 65)
+
+        conn = None
+
+        try:
+            conn = connect_database(company)
+            tables = discover_tables(conn)
+
+            print(f"Tables discovered: {len(tables)}")
+
+            for schema, table in tables:
+                try:
+                    result = extract_table(
+                        conn,
+                        company,
+                        schema,
+                        table,
+                        run_id,
+                    )
+
+                    if result is not None:
+                        total_tables += 1
+                        total_rows += result["rows"]
+
+                except Exception as exc:
+                    error_message = (
+                        f"{company['database']} | "
+                        f"{schema}.{table} | {exc}"
+                    )
+
+                    errors.append(error_message)
+                    print(f"  ERROR: {error_message}")
+
+        except Exception as exc:
+            error_message = (
+                f"{company['database']} | {exc}"
+            )
+            errors.append(error_message)
+            print(f"DATABASE ERROR: {error_message}")
+
+        finally:
+            if conn is not None:
+                conn.close()
+
+    print("\n" + "=" * 65)
+    print("EXTRACTION SUMMARY")
+    print("=" * 65)
+    print(f"Tables uploaded: {total_tables}")
+    print(f"Total rows extracted: {total_rows}")
+    print(f"Errors: {len(errors)}")
+    print(f"Run ID: {run_id}")
+
+    if errors:
+        print("\nSome tables or databases failed:")
+        for error in errors:
+            print(f"- {error}")
+
+        raise RuntimeError(
+            "Extraction incomplete. Review the errors above."
+        )
+
+    print("\nExtraction completed successfully.")
+
+
+if __name__ == "__main__":
+    main()

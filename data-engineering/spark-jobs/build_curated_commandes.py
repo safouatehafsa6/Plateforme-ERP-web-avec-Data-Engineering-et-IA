@@ -1,53 +1,126 @@
 
+from dotenv import dotenv_values
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, trim, current_timestamp
+from pyspark.sql.functions import (
+    col,
+    trim,
+    current_timestamp,
+    regexp_replace
+)
+from pyspark.sql.types import DecimalType
 
-SOURCE_PATH = "s3a://staging/commandes/run_20261010T175907Z"
+ENV_PATH = "/tmp/erp.env"
+
+SOURCE_PATH = "s3a://staging/company_*/public/commande/*"
 TARGET_PATH = "s3a://curated/commandes"
+
+config = dotenv_values(ENV_PATH)
 
 spark = (
     SparkSession.builder
     .appName("ERP-Commandes-Curated")
+    .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000")
+    .config(
+        "spark.hadoop.fs.s3a.access.key",
+        config["MINIO_ROOT_USER"]
+    )
+    .config(
+        "spark.hadoop.fs.s3a.secret.key",
+        config["MINIO_ROOT_PASSWORD"]
+    )
+    .config("spark.hadoop.fs.s3a.path.style.access", "true")
+    .config(
+        "spark.hadoop.fs.s3a.impl",
+        "org.apache.hadoop.fs.s3a.S3AFileSystem"
+    )
+    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
     .getOrCreate()
 )
 
+spark.sparkContext.setLogLevel("ERROR")
+
 try:
-    # Lire les données transformées depuis staging
+    print("=" * 60)
+    print("ETAPE 1 - Lecture des commandes depuis Staging")
+
     df = spark.read.parquet(SOURCE_PATH)
 
-    # Contrôler et nettoyer les données
-    df = (
-        df.withColumn("statut", trim(col("statut")))
-        .withColumn("numero", trim(col("numero")))
+    print("Schema source :")
+    df.printSchema()
+
+    print("Nombre de lignes source :", df.count())
+
+    # Nettoyage des champs texte
+    df_clean = df
+
+    for field in ["numero", "statut"]:
+        if field in df_clean.columns:
+            df_clean = df_clean.withColumn(
+                field,
+                trim(col(field))
+            )
+
+    # Conversion du montant en type numérique
+    df_clean = df_clean.withColumn(
+        "montant_total",
+        regexp_replace(
+            trim(col("montant_total").cast("string")),
+            ",",
+            "."
+        ).cast(DecimalType(18, 2))
     )
 
-    # Ne conserver que les enregistrements valides
-    df_valid = df.filter(
+    print("=" * 60)
+    print("ETAPE 2 - Validation des données")
+
+    df_valid = df_clean.filter(
         col("id").isNotNull()
-        & col("company_id").isNotNull()
-        & (col("company_id") > 0)
+        & col("_company_id").isNotNull()
+        & (col("_company_id") > 0)
         & col("montant_total").isNotNull()
         & (col("montant_total") >= 0)
     )
 
-    # Ajouter la date de préparation analytique
+    total_source = df_clean.count()
+    total_valid = df_valid.count()
+    total_rejected = total_source - total_valid
+
+    print("Lignes source :", total_source)
+    print("Lignes valides :", total_valid)
+    print("Lignes rejetées :", total_rejected)
+
+    # Ajout de la date de préparation Curated
     df_curated = df_valid.withColumn(
-        "curated_at", current_timestamp()
+        "curated_at",
+        current_timestamp()
     )
 
-    print("=== Données prêtes pour l'analyse ===")
-    df_curated.printSchema()
-    df_curated.show(truncate=False)
+    print("=" * 60)
+    print("ETAPE 3 - Aperçu des données Curated")
 
-    # Écrire dans la couche curated en Parquet
+    df_curated.select(
+        "_company_id",
+        "id",
+        "numero",
+        "statut",
+        "montant_total",
+        "curated_at"
+    ).show(truncate=False)
+
+    print("=" * 60)
+    print("ETAPE 4 - Ecriture dans MinIO")
+
     (
         df_curated.write
         .mode("overwrite")
+        .partitionBy("_company_id")
         .parquet(TARGET_PATH)
     )
 
-    print(f"Curated terminé : {TARGET_PATH}")
-    print(f"Lignes valides : {df_curated.count()}")
+    print("Curated terminé :", TARGET_PATH)
+    print("Nombre de lignes écrites :", total_valid)
+    print("Partitionnement par entreprise : _company_id")
+    print("=" * 60)
 
 finally:
     spark.stop()

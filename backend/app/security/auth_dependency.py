@@ -1,75 +1,93 @@
-"""
-auth_dependency.py — Vérifie le jeton JWT envoyé par le frontend (en-tête
-Authorization: Bearer ...) et fournit l'identité de l'utilisateur connecté
-(email, rôle, base entreprise) aux routes qui en ont besoin.
-
-Utilisation dans une route :
-
-    @router.get("/utilisateurs")
-    def lister(utilisateur=Depends(utilisateur_connecte)):
-        ...
-"""
-
 import os
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+from app.db import get_pool_entreprise, pool_central
+
 _schema_bearer = HTTPBearer()
 
 
-def utilisateur_connecte(identifiants: HTTPAuthorizationCredentials = Depends(_schema_bearer)) -> dict:
-    token = identifiants.credentials
+def _lire_une_ligne(pool, requete: str, parametres: tuple):
+    conn = pool.getconn()
     try:
-        payload = jwt.decode(
-            token,
-            os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+        with conn.cursor() as cur:
+            cur.execute(requete, parametres)
+            return cur.fetchone()
+    finally:
+        pool.putconn(conn)
+
+
+def utilisateur_connecte(
+    identifiants: HTTPAuthorizationCredentials = Depends(_schema_bearer),
+) -> dict:
+    try:
+        return jwt.decode(
+            identifiants.credentials,
+            os.environ["JWT_SECRET"],
             algorithms=["HS256"],
         )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Session expirée, merci de vous reconnecter.")
-    except jwt.InvalidTokenError:
+    except (jwt.InvalidTokenError, KeyError):
         raise HTTPException(status_code=401, detail="Jeton d'authentification invalide.")
 
-    return payload  # contient : id, email, role, nomBase (si compte tenant)
 
-
-def exiger_role_admin(utilisateur: dict = Depends(utilisateur_connecte)) -> dict:
-    """A utiliser sur les routes réservées à l'Administrateur de
-    l'entreprise (gestion des collaborateurs, des rôles...).
-
-    Ces routes travaillent toujours DANS la base d'une entreprise : elles
-    exigent donc un jeton de compte d'entreprise, qui porte le nom de
-    cette base (nomBase). Le Super Administrateur de la plateforme n'a
-    volontairement pas accès ici : conformément au cahier des charges, il
-    "n'accède jamais aux données métier des entreprises clientes" et ne
-    dispose d'aucune visibilité sur leurs données internes."""
-    if utilisateur.get("role") != "Admin":
+def exiger_role_admin(
+    utilisateur: dict = Depends(utilisateur_connecte),
+) -> dict:
+    if (
+        utilisateur.get("type") != "interne"
+        or not utilisateur.get("nomBase")
+        or not utilisateur.get("id")
+        or not utilisateur.get("email")
+    ):
         raise HTTPException(status_code=403, detail="Action réservée à l'administrateur de l'entreprise.")
 
-    if not utilisateur.get("nomBase"):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Ce compte n'est rattaché à aucun environnement d'entreprise. "
-                "Connectez-vous avec un compte Administrateur d'entreprise."
-            ),
-        )
+    compte = _lire_une_ligne(
+        get_pool_entreprise(utilisateur["nomBase"]),
+        """
+        SELECT u.actif, r.nom
+        FROM utilisateur u
+        LEFT JOIN role r ON r.id = u.role_id
+        WHERE u.id = %s AND LOWER(u.email) = LOWER(%s)
+        """,
+        (utilisateur["id"], utilisateur["email"]),
+    )
+
+    if not compte or not compte[0]:
+        raise HTTPException(status_code=401, detail="Compte inexistant ou désactivé. Reconnectez-vous.")
+
+    if compte[1] != "Admin":
+        raise HTTPException(status_code=403, detail="Action réservée à l'administrateur de l'entreprise.")
+
+    utilisateur["role"] = compte[1]
     return utilisateur
 
 
-def exiger_utilisateur_externe(utilisateur: dict = Depends(utilisateur_connecte)) -> dict:
-    """A utiliser sur les routes du portail Utilisateurs externes (mes
-    documents, mes factures...).
+def exiger_utilisateur_externe(
+    utilisateur: dict = Depends(utilisateur_connecte),
+) -> dict:
+    if (
+        utilisateur.get("type") != "externe"
+        or not utilisateur.get("id")
+        or not utilisateur.get("clientId")
+        or not utilisateur.get("nomBase")
+        or not utilisateur.get("email")
+    ):
+        raise HTTPException(status_code=403, detail="Compte du portail externe requis.")
 
-    Distinct de exiger_role_admin : ici on exige au contraire un compte
-    externe (type == "externe"), jamais un collaborateur interne ni le
-    Super Administrateur — l'isolation entre "gérer l'entreprise" et
-    "consulter sa propre relation commerciale avec elle" doit rester
-    stricte, dans les deux sens."""
-    if utilisateur.get("type") != "externe" or not utilisateur.get("clientId"):
-        raise HTTPException(
-            status_code=403,
-            detail="Ce compte n'est pas un compte du portail Utilisateurs externes.",
-        )
+    compte = _lire_une_ligne(
+        get_pool_entreprise(utilisateur["nomBase"]),
+        """
+        SELECT actif, client_id
+        FROM utilisateur_externe
+        WHERE id = %s AND LOWER(email) = LOWER(%s)
+        """,
+        (utilisateur["id"], utilisateur["email"]),
+    )
+
+    if not compte or not compte[0] or str(compte[1]) != str(utilisateur["clientId"]):
+        raise HTTPException(status_code=401, detail="Compte externe invalide ou désactivé.")
+
     return utilisateur

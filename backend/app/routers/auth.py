@@ -116,7 +116,7 @@ async def login(payload: LoginPayload):
         expiration = datetime.now(timezone.utc) + timedelta(hours=8)
         token = jwt.encode(
             {"id": utilisateur_id, "email": email_bd, "role": "super_admin", "type": "plateforme", "exp": expiration},
-            os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+            os.environ["JWT_SECRET"],
             algorithm="HS256",
         )
         return {"token": token, "utilisateur": {"id": utilisateur_id, "nom": nom, "email": email_bd}}
@@ -175,7 +175,7 @@ async def login(payload: LoginPayload):
                             "nomBase": nom_base, "entrepriseId": entreprise_id, "clientId": client_id,
                             "exp": expiration,
                         },
-                        os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+                        os.environ["JWT_SECRET"],
                         algorithm="HS256",
                     )
                     return {
@@ -214,7 +214,7 @@ async def login(payload: LoginPayload):
                             "id": utilisateur_id, "email": email, "role": role_nom or "Utilisateur", "type": "interne",
                             "nomBase": nom_base, "entrepriseId": entreprise_id, "exp": expiration,
                         },
-                        os.getenv("JWT_SECRET", "dev_secret_a_remplacer"),
+                        os.environ["JWT_SECRET"],
                         algorithm="HS256",
                     )
                     return {

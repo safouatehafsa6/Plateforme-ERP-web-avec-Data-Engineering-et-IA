@@ -6,3 +6,6 @@ __pycache__/
 backend_backup_*/
 frontend_backup_*/
 backend_avant_*/
+
+.env
+!.env.example

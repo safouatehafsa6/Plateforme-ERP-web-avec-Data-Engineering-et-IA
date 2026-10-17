@@ -206,20 +206,149 @@ def _format_search(rows,entity,lang):
     if lang=="ar": return "نتائج البحث:\n"+"\n".join(lines)
     return "Résultats de recherche :\n"+"\n".join(lines)
 
+def _normalize_nlu_text(value):
+    """Normalize accents and punctuation for multilingual intent fallback."""
+    import re
+    import unicodedata
+    text=(value or "").lower().replace("’", "'").replace("œ", "oe").replace("æ", "ae")
+    text="".join(ch for ch in unicodedata.normalize("NFKD", text) if not unicodedata.combining(ch))
+    text=re.sub(r"[^\w\s@.+/-]", " ", text, flags=re.UNICODE)
+    return " ".join(text.split())
+
+
+def _fallback_understanding(message):
+    """Deterministic multilingual fallback used when no LLM is configured or available."""
+    import re
+    m=_normalize_nlu_text(message)
+    result={"intent":None,"entities":{},"confidence":0.0,"source":"rules"}
+
+    order_terms=("commande", "commandes", "order", "orders", "طلب", "طلبات")
+    order_actions=(
+        "creer", "creation", "ajouter", "ajoute", "faire", "passer", "preparer", "etablir",
+        "lancer", "enregistrer", "commander", "je veux", "je voudrais", "j'aimerais", "j ai besoin",
+        "make", "place", "create", "prepare", "need", "want to", "add", "new", "please create",
+        "إنشاء", "انشاء", "اضافة", "أريد", "اريد", "طلب جديد", "انشاء طلب", "إنشاء طلب"
+    )
+    client_terms=("client", "clients", "customer", "customers", "عميل", "عملاء", "زبون", "زبائن")
+    supplier_terms=("fournisseur", "fournisseurs", "supplier", "suppliers", "مورد", "موردين")
+    create_terms=("creer", "creation", "ajouter", "ajoute", "nouveau", "nouvelle", "add", "create", "new", "enregistrer", "إنشاء", "انشاء", "اضافة", "إضافة")
+    search_terms=("chercher", "rechercher", "recherche", "trouver", "cherche", "find", "search", "look for", "consulter", "afficher", "montre", "liste", "بحث", "ابحث", "البحث", "عرض")
+    edit_terms=("modifier", "modifie", "modification", "edit", "update", "change", "changer", "mettre a jour", "تعديل", "عدل", "تغيير")
+
+    has_order=any(term in m for term in order_terms)
+    has_action=any(term in m for term in order_actions)
+    # "faire/passer une commande" and "je veux une commande" are valid creation requests.
+    if has_order and (has_action or re.search(r"\b(une|la|nouvelle|une nouvelle|une commande)\b.*\bcommande\b",m)):
+        result.update(intent="create_commande",confidence=0.78)
+    else:
+        entity="client" if any(term in m for term in client_terms) else "fournisseur" if any(term in m for term in supplier_terms) else None
+        if entity:
+            if any(term in m for term in create_terms) or (entity=="client" and re.search(r"\b(creer|ajouter|faire)\b.*\b(client|customer)\b",m)):
+                result.update(intent=f"create_{entity}",confidence=0.75)
+            elif any(term in m for term in edit_terms):
+                result.update(intent=f"edit_{entity}",confidence=0.75)
+            elif any(term in m for term in search_terms):
+                result.update(intent=f"search_{entity}",confidence=0.72)
+
+    # Low-risk entity extraction. These values are suggestions for the existing workflow,
+    # never trusted as identifiers and always resolved/validated against the tenant database.
+    quantity=re.search(r"\b(\d{1,7})\b\s*(?:unites?|pieces?|pcs?)?",m)
+    if quantity:
+        result["entities"]["quantity"]=int(quantity.group(1))
+    email=re.search(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}",message or "")
+    if email:
+        result["entities"]["email"]=email.group(0)
+    client_match=re.search(r"(?:\b(?:pour|du|de|au|client)\b)\s+(?:le\s+)?(?:client\s+)?[«\"']?([\wÀ-ÿ][\wÀ-ÿ .'-]{1,60})",message or "",re.IGNORECASE)
+    if client_match and result["intent"]=="create_commande":
+        candidate=client_match.group(1).strip(" .,'\"»")
+        stop_words=("avec", "et", "pour", "produit", "article", "quantite", "quantité", "de", "du")
+        candidate=re.split(r"\s+(?:"+"|".join(stop_words)+r")\s+",candidate,flags=re.IGNORECASE)[0].strip()
+        if candidate and candidate.lower() not in {"une", "un", "commande", "client", "mon", "ma", "mes"}:
+            result["entities"]["client_name"]=candidate
+    product_match=re.search(r"(?:produit|article)\s+(?:nomme\s+|appele\s+)?[«\"']?([\wÀ-ÿ][\wÀ-ÿ .'-]{1,60})",message or "",re.IGNORECASE)
+    if product_match and result["intent"]=="create_commande":
+        result["entities"]["product_name"]=re.split(r"\s+(?:pour|avec|quantite|quantité|et)\s+",product_match.group(1),flags=re.IGNORECASE)[0].strip(" .,'\"»")
+    named_match=re.search(r"(?:nomme|nommé|nommee|nommée|appele|appelé|appelee|appelée|named|name is)\s+[«\"']?([\wÀ-ÿ][\wÀ-ÿ .'-]{1,60})",message or "",re.IGNORECASE)
+    if named_match:
+        candidate=re.split(r"\s+(?:avec|et|email|e-mail|telephone|téléphone|adresse|phone)\s+",named_match.group(1),flags=re.IGNORECASE)[0].strip(" .,'\"»")
+        if result["intent"]=="create_client": result["entities"]["client_name"]=candidate
+        elif result["intent"]=="create_fournisseur": result["entities"]["supplier_name"]=candidate
+    return result
+
+
+def _understand_message(message, langue="fr"):
+    """Use an optional OpenAI-compatible LLM for intent/entity extraction, with safe fallback.
+
+    Configure OPENAI_API_KEY and optionally OPENAI_BASE_URL / OPENAI_MODEL in the root .env.
+    The model only classifies the request; all ERP reads/writes remain in permission-checked code.
+    """
+    import json
+    import os
+    import re
+    import httpx
+
+    fallback=_fallback_understanding(message)
+    api_key=os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        return fallback
+
+    allowed={"create_commande","create_client","create_fournisseur","edit_client","edit_fournisseur",
+             "search_client","search_fournisseur","analytics","general",None}
+    base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    system=(
+        "Tu es un classificateur NLU pour un ERP. Tu ne réponds pas à l'utilisateur et n'exécutes aucune action. "
+        "Retourne exclusivement un objet JSON valide avec les clés intent, entities, confidence. "
+        "intent doit être l'une de: create_commande, create_client, create_fournisseur, edit_client, "
+        "edit_fournisseur, search_client, search_fournisseur, analytics, general, null. "
+        "entities est un objet pouvant contenir client_name, product_name, quantity (entier), email, phone, address, field, value. "
+        "N'invente aucune information; utilise null ou omets une entité absente. confidence est un nombre entre 0 et 1. "
+        "Interprète les paraphrases en français, anglais et arabe, par exemple 'créer une commande', "
+        "'faire une commande', 'passer une commande' et 'je voudrais commander' comme create_commande. "
+        "Si la demande est ambiguë ou ne correspond pas à une action supportée, choisis general ou null."
+    )
+    try:
+        response=httpx.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization":f"Bearer {api_key}","Content-Type":"application/json"},
+            json={"model":model,"temperature":0,"response_format":{"type":"json_object"},
+                  "messages":[{"role":"system","content":system},
+                              {"role":"user","content":json.dumps({"message":message,"langue":langue},ensure_ascii=False)}]},
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        content=response.json()["choices"][0]["message"]["content"]
+        parsed=json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE))
+        intent=parsed.get("intent")
+        if intent not in allowed:
+            return fallback
+        # General/analytics requests continue through the existing deterministic handlers.
+        if intent in {"general", "analytics"}:
+            intent=None
+        entities=parsed.get("entities") if isinstance(parsed.get("entities"),dict) else {}
+        safe_entities={}
+        for key in ("client_name","product_name","email","phone","address","field","value"):
+            value=entities.get(key)
+            if isinstance(value,str) and value.strip():
+                safe_entities[key]=value.strip()[:200]
+        quantity=entities.get("quantity")
+        if isinstance(quantity,int) and 0 < quantity <= 1000000:
+            safe_entities["quantity"]=quantity
+        confidence=parsed.get("confidence",0)
+        try: confidence=max(0.0,min(1.0,float(confidence)))
+        except (TypeError,ValueError): confidence=0.0
+        # Avoid launching a workflow from an uncertain model guess.
+        if intent not in {None,"general","analytics"} and confidence < 0.55:
+            return fallback
+        return {"intent":intent,"entities":safe_entities,"confidence":confidence,"source":"llm"}
+    except Exception:
+        # The assistant must remain usable if the provider is unavailable or times out.
+        return fallback
+
+
 def _intent(m):
-    create=["ajouter","ajoute","créer","creer","création","creation","nouveau","nouvelle","add","create","new","إضافة","اضافة","إنشاء","انشاء"]
-    search=["chercher","rechercher","recherche","trouver","cherche","find","search","look for","بحث","ابحث","البحث"]
-    edit=["modifier","modifie","modifier le","edit","update","change","changer","تعديل","عدل","تغيير"]
-    client=["client","clients","customer","customers","عميل","عملاء","زبون"]
-    supplier=["fournisseur","fournisseurs","supplier","suppliers","مورد","موردين"]
-    order=["commande","commandes","order","orders","طلب","طلبات"]
-    if any(w in m for w in order) and any(w in m for w in create+["créer","creer","create"]): return "create_commande"
-    ent="client" if any(w in m for w in client) else "fournisseur" if any(w in m for w in supplier) else None
-    if not ent:return None
-    if any(w in m for w in create):return "create_"+ent
-    if any(w in m for w in edit):return "edit_"+ent
-    if any(w in m for w in search):return "search_"+ent
-    return None
+    """Backward-compatible wrapper for older tests/call sites."""
+    return _fallback_understanding(m).get("intent")
 
 def _answer_data(message,langue,user):
     m=message.lower().strip()
@@ -424,7 +553,10 @@ def _guide(lang,module):
 def chat(payload: AssistantMessage, utilisateur=Depends(utilisateur_connecte)):
     if not utilisateur.get("nomBase") or utilisateur.get("type")=="externe": raise HTTPException(403,"Assistant réservé aux collaborateurs de l'entreprise.")
     m=payload.message.lower().strip(); state=payload.state.model_copy(deep=True); prompts=_prompts(payload.langue)
-    intent=_intent(m)
+    # Do not reclassify follow-up answers while a multi-step ERP workflow is active.
+    understanding=_understand_message(payload.message,payload.langue) if not state.operation else {"intent":None,"entities":{}}
+    intent=understanding.get("intent")
+    entities=understanding.get("entities") or {}
     if intent:
         if intent == "create_commande":
             if not _has_permission(utilisateur,"ventes","creer"):
@@ -432,12 +564,28 @@ def chat(payload: AssistantMessage, utilisateur=Depends(utilisateur_connecte)):
             if not _has_permission(utilisateur,"clients","consulter"):
                 return {"reply":_denied(payload.langue,"clients","consulter"),"state":AssistantState().model_dump()}
             state=AssistantState(operation="create_commande",step="client",data={})
+            client_name=entities.get("client_name")
+            if client_name:
+                rows=_find_entity(utilisateur,"client",client_name)
+                exact=[row for row in rows if str(row.get("nom","")).strip().casefold()==client_name.strip().casefold()]
+                selected=exact[0] if len(exact)==1 else rows[0] if len(rows)==1 else None
+                if selected:
+                    state.data={"client_id":selected["id"],"client_nom":selected["nom"],"lines":[]}
+                    state.step="product"
+                    reply=f"Client sélectionné : {selected['nom']}.\n\n{prompts['order_product']}" if payload.langue=="fr" else (f"Customer selected: {selected['nom']}.\n\n{prompts['order_product']}" if payload.langue=="en" else f"تم اختيار العميل: {selected['nom']}.\n\n{prompts['order_product']}")
+                    return {"reply":reply,"state":state.model_dump()}
             return {"reply":prompts["order_client"],"state":state.model_dump()}
         entity=intent.split("_")[1]; module,_=_entity_meta(entity)
         action="creer" if intent.startswith("create") else "consulter" if intent.startswith("search") else "modifier"
         if not _has_permission(utilisateur,module,action): return {"reply":_denied(payload.langue,module,action),"state":AssistantState().model_dump()}
         if intent.startswith("create"):
-            state=AssistantState(operation=intent,step="nom",data={}); return {"reply":prompts["nom"],"state":state.model_dump()}
+            initial_data={}
+            initial_name=entities.get("client_name") if entity=="client" else None
+            if initial_name:
+                initial_data["nom"]=initial_name
+                state=AssistantState(operation=intent,step="email",data=initial_data)
+                return {"reply":prompts["email"],"state":state.model_dump()}
+            state=AssistantState(operation=intent,step="nom",data=initial_data); return {"reply":prompts["nom"],"state":state.model_dump()}
         if intent.startswith("search"):
             rows=_find_entity(utilisateur,entity,m)
             # Remove command words for a better query when possible.

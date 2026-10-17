@@ -420,6 +420,20 @@ def _guide(lang,module):
     if lang=="ar": return f"أنت الآن في وحدة {nom}. يمكنني الاطلاع على بيانات ERP، إنشاء السجلات، البحث عن العملاء أو الموردين وإرشادك في التعديلات، حسب صلاحياتك."
     return f"Vous êtes actuellement dans {nom}. Je peux consulter les données ERP, créer des enregistrements, rechercher des clients ou fournisseurs et vous guider dans les modifications, selon vos permissions."
 
+def _new_client_question(lang, nom):
+    if lang == "en":
+        return f"The customer \"{nom}\" does not exist. Do you want to create it? (yes/no)"
+    if lang == "ar":
+        return f"\u0627\u0644\u0639\u0645\u064a\u0644 \u00ab{nom}\u00bb \u063a\u064a\u0631 \u0645\u0648\u062c\u0648\u062f. \u0647\u0644 \u062a\u0631\u064a\u062f \u0625\u0646\u0634\u0627\u0621\u0647\u061f (\u0646\u0639\u0645/\u0644\u0627)"
+    return f"Le client \u00ab {nom} \u00bb n'existe pas. Voulez-vous le cr\u00e9er ? (oui/non)"
+
+def _new_client_created(lang, nom):
+    if lang == "en":
+        return f"Customer \"{nom}\" created and selected."
+    if lang == "ar":
+        return f"\u062a\u0645 \u0625\u0646\u0634\u0627\u0621 \u0627\u0644\u0639\u0645\u064a\u0644 \u00ab{nom}\u00bb \u0648\u0627\u062e\u062a\u064a\u0627\u0631\u0647."
+    return f"Le client \u00ab {nom} \u00bb a \u00e9t\u00e9 cr\u00e9\u00e9 et s\u00e9lectionn\u00e9."
+
 @router.post("/chat")
 def chat(payload: AssistantMessage, utilisateur=Depends(utilisateur_connecte)):
     if not utilisateur.get("nomBase") or utilisateur.get("type")=="externe": raise HTTPException(403,"Assistant réservé aux collaborateurs de l'entreprise.")
@@ -451,10 +465,29 @@ def chat(payload: AssistantMessage, utilisateur=Depends(utilisateur_connecte)):
     if op == "create_commande":
         if step == "client":
             rows=_find_entity(utilisateur,"client",payload.message)
+            if len(rows) == 0 and payload.message.strip():
+                if not _has_permission(utilisateur,"clients","creer"):
+                    return {"reply":_format_search(rows,"client",payload.langue)+"\n\n"+prompts["order_client"],"state":state.model_dump()}
+                data["new_client_nom"]=payload.message.strip(); state.step="confirm_new_client"; state.data=data
+                return {"reply":_new_client_question(payload.langue,data["new_client_nom"]),"state":state.model_dump()}
             if len(rows) != 1:
                 return {"reply":_format_search(rows,"client",payload.langue)+"\n\n"+prompts["order_client"],"state":state.model_dump()}
             data["client_id"]=rows[0]["id"]; data["client_nom"]=rows[0]["nom"]; data["lines"]=[]; state.step="product"
             reply=f"Client sélectionné : {rows[0]['nom']}.\n\n{prompts['order_product']}"
+        elif step == "confirm_new_client":
+            if _is_yes(m):
+                nom=data.get("new_client_nom","")
+                try:
+                    created=_create_entity(utilisateur,"client",{"nom":nom})
+                except HTTPException as e:
+                    state.step="client"; reply=str(e.detail)+"\n\n"+prompts["order_client"]
+                else:
+                    data["client_id"]=created["id"]; data["client_nom"]=created["nom"]; data["lines"]=[]; data.pop("new_client_nom",None); state.step="product"
+                    reply=_new_client_created(payload.langue,created["nom"])+"\n\n"+prompts["order_product"]
+            elif _is_no(m):
+                data.pop("new_client_nom",None); state.step="client"; reply=prompts["order_client"]
+            else:
+                reply=_new_client_question(payload.langue,data.get("new_client_nom",""))
         elif step == "product":
             rows=_search_products(utilisateur,payload.message)
             if len(rows) != 1:

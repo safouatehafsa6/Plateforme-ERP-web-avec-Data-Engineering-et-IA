@@ -244,3 +244,85 @@ La création d'un devis/commande utilise les tables `client` et `produit`. Il fa
 ## Suite logique du chantier
 
 La base est maintenant prête pour les étapes suivantes : PDF devis/BL/facture, TVA et conditions de paiement, livraison partielle, avoirs, suppression/annulation contrôlée, gestion complète Clients et Produits, export, journal d'audit et tests automatisés.
+# Amélioration — validation du formulaire Clients
+
+## Exigence ciblée
+
+Assistance à la saisie, validation des formulaires et cohérence des données, conformément aux exigences générales de BENJEDDOU Technologie Services.
+
+## Comportement ajouté
+
+- Le nom du client est obligatoire, nettoyé des espaces de début/fin et limité à 150 caractères.
+- L’adresse e-mail, si elle est renseignée, est vérifiée et limitée à 150 caractères.
+- Le téléphone, s’il est renseigné, accepte un format international courant, avec un + initial facultatif, et contrôle les caractères ainsi que le nombre de chiffres (7 à 15).
+- L’adresse est nettoyée des espaces superflus et limitée à 1 000 caractères dans ce formulaire.
+- Les erreurs sont présentées au niveau du champ concerné, avec attributs d’accessibilité et focus du premier champ invalide.
+- Le backend répète les validations : la qualité ne dépend donc pas uniquement du navigateur.
+- Les champs facultatifs laissés vides sont normalisés à `null`.
+
+## Fichiers concernés
+
+- `frontend/src/pages/Clients.jsx`
+- `frontend/src/validation/client.js` (nouveau)
+- `frontend/src/styles/global.css`
+- `frontend/tests/clientValidation.test.js` (nouveau)
+- `frontend/package.json` (commande `npm test`)
+- `backend/app/routers/clients.py`
+- `backend/app/schemas/clients.py` (nouveau)
+- `backend/app/schemas/__init__.py` (nouveau)
+- `backend/tests/test_client_payload.py` (nouveau)
+
+## Vérifications exécutées
+
+- Tests frontend : 6 réussis, 0 échec.
+- Tests backend : 7 réussis, 0 échec.
+- Compilation syntaxique Python (`py_compile`) : réussie.
+- Le build de production Vite n’a pas pu être confirmé dans l’environnement de préparation : le téléchargement des dépendances npm a échoué avec une erreur DNS `EAI_AGAIN`.
+
+## Exécuter les vérifications sur le poste de développement
+
+Dans PowerShell, à la racine du projet :
+
+```powershell
+cd frontend
+npm ci
+npm test
+npm run build
+```
+
+Puis, avec l’environnement Python du backend activé :
+
+```powershell
+cd ..\backend
+python -m unittest discover -s tests -v
+```
+
+Tester ensuite la création et la modification d’un client dans l’application, avec des données valides et invalides, avant de considérer l’amélioration validée de bout en bout.
+
+## Limites
+
+Cette livraison porte sur le formulaire Clients uniquement. Elle n’implémente pas encore une validation globale pour les autres modules, une recherche globale, la sécurité complète ou le Dashboard analytique.
+
+Le projet distribué ne contient pas le fichier local `.env`, le répertoire `.git`, les dépendances installées (`node_modules`) ni les fichiers temporaires. Conserver le `.env` déjà utilisé sur le poste et ne jamais publier ses valeurs.
+
+
+## Évolutions du 16 octobre 2026
+
+### 1. Détection des doublons
+- Ajout d'une vérification serveur avant l'enregistrement, à partir de l'adresse e-mail et du numéro de téléphone.
+- Comparaison des e-mails sans tenir compte des majuscules et comparaison des téléphones à partir des chiffres, afin de repérer des formats d'affichage différents.
+- Le backend bloque également la création ou la modification si l'e-mail ou le téléphone est déjà associé à un autre client. La vérification existante du nom est conservée.
+
+### 2. Assistance à la saisie
+- Ajout de suggestions de correction pour quelques fautes de domaine e-mail courantes (par exemple `gmal.com` vers `gmail.com`).
+- La correction est proposée à l'utilisateur et n'est jamais appliquée automatiquement. Il s'agit d'une assistance heuristique, pas d'un modèle d'IA.
+
+### 3. Fiche détaillée du client
+- Ajout d'une action « Fiche » dans la liste des clients.
+- La fiche affiche l'identifiant, le nom, l'e-mail, le téléphone, l'adresse et le nombre de commandes associées.
+- La fiche propose un accès direct à la modification du client.
+
+### Vérifications réalisées
+- Les tests unitaires backend de validation du payload passent (7 tests).
+- Les tests frontend de validation et de suggestion sont présents dans `frontend/tests/clientValidation.test.js`.
+- Le build Vite n'a pas pu être confirmé dans cet environnement, car l'installation des dépendances npm n'a pas abouti. Un build et des essais fonctionnels dans l'environnement Docker du projet restent nécessaires avant de considérer ces évolutions comme validées en intégration.

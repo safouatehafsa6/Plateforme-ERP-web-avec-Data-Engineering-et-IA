@@ -1547,3 +1547,31 @@ a {
 .clients-info-item--wide { grid-column:1 / -1; }
 .clients-fiche__footer { display:flex; justify-content:flex-end; gap:.6rem; padding-top:1rem; border-top:1px solid var(--border-color, #e5e7eb); }
 @media (max-width: 600px) { .clients-fiche__grid { grid-template-columns:1fr; } .clients-info-item--wide { grid-column:auto; } .clients-fiche { padding:1rem; } .clients-fiche__footer { flex-wrap:wrap; } }
+
+/* ===== Dashboard (pipeline Data Engineering + Streamlit) ===== */
+.dd-entete { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.dd-actions { display: flex; align-items: center; gap: 1rem; }
+.dd-maj { color: var(--text-muted); font-size: 0.85rem; }
+.dd-bouton {
+  background: var(--brass); color: #fff; border: none; border-radius: 6px;
+  padding: 0.55rem 1.1rem; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+}
+.dd-bouton:hover { background: var(--brass-dark); }
+.dd-bouton:disabled { opacity: 0.6; cursor: not-allowed; }
+.dd-carte {
+  background: var(--carte-fond); border: 1px solid var(--paper-line); border-radius: 10px;
+  padding: 1.5rem; max-width: 520px; color: var(--text-dark);
+}
+.dd-carte--erreur { border-color: var(--danger); }
+.dd-sous-titre { margin: 0 0 1rem; font-size: 1.1rem; }
+.dd-etapes { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; gap: 0.6rem; }
+.dd-etape { display: flex; align-items: center; gap: 0.6rem; color: var(--text-muted); }
+.dd-etape--success { color: var(--teal); }
+.dd-etape--running, .dd-etape--up_for_retry { color: var(--text-dark); font-weight: 600; }
+.dd-etape--failed, .dd-etape--upstream_failed { color: var(--danger); }
+.dd-etape__symbole { width: 1.2rem; text-align: center; }
+.dd-aide { margin: 0; color: var(--text-muted); font-size: 0.85rem; }
+.dd-iframe {
+  width: 100%; height: calc(100vh - 170px); min-height: 600px;
+  border: 1px solid var(--paper-line); border-radius: 10px; background: var(--carte-fond);
+}

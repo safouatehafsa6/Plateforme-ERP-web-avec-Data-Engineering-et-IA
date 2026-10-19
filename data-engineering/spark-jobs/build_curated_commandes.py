@@ -1,126 +1,78 @@
+"""Etape 3 - STAGING -> CURATED (commandes), pour le run courant.
 
-from dotenv import dotenv_values
-from pyspark.sql import SparkSession
-from pyspark.sql.functions import (
-    col,
-    trim,
-    current_timestamp,
-    regexp_replace
-)
+Le resultat est ecrit dans un dossier propre au run :
+    curated/commandes/run_id=<run_id>/_company_id=<n>/...
+Le dossier n'est expose au Dashboard qu'apres succes du controle qualite
+(quality_checks_curated.py), qui publie le pointeur curated/_meta/latest_success.json.
+"""
+from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType
 
-ENV_PATH = "/tmp/erp.env"
+from pipeline_common import build_spark, get_run_id, lake_uri
 
-SOURCE_PATH = "s3a://staging/company_*/public/commande/*"
-TARGET_PATH = "s3a://curated/commandes"
+REQUIRED = ["_company_id", "id", "client_id", "date_commande", "statut", "montant_total"]
+OPTIONAL = ["numero", "date_modification"]  # colonnes metier utiles si presentes
+# Volontairement exclus : notes (texte libre), devis_id, colonnes techniques.
 
-config = dotenv_values(ENV_PATH)
 
-spark = (
-    SparkSession.builder
-    .appName("ERP-Commandes-Curated")
-    .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000")
-    .config(
-        "spark.hadoop.fs.s3a.access.key",
-        config["MINIO_ROOT_USER"]
-    )
-    .config(
-        "spark.hadoop.fs.s3a.secret.key",
-        config["MINIO_ROOT_PASSWORD"]
-    )
-    .config("spark.hadoop.fs.s3a.path.style.access", "true")
-    .config(
-        "spark.hadoop.fs.s3a.impl",
-        "org.apache.hadoop.fs.s3a.S3AFileSystem"
-    )
-    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-    .getOrCreate()
-)
+def main():
+    run_id = get_run_id()
+    source_path = f"{lake_uri('staging')}/company_*/public/commande/commande_{run_id}"
+    target_path = f"{lake_uri('curated')}/commandes/run_id={run_id}"
+    rejected_path = f"{lake_uri('staging')}/rejected/commandes/run_id={run_id}"
 
-spark.sparkContext.setLogLevel("ERROR")
+    spark = build_spark("ERP-Commandes-Curated")
+    try:
+        df = spark.read.parquet(source_path)  # echoue si aucun fichier pour ce run
 
-try:
-    print("=" * 60)
-    print("ETAPE 1 - Lecture des commandes depuis Staging")
+        missing = [c for c in REQUIRED if c not in df.columns]
+        if missing:
+            raise RuntimeError(f"Colonnes obligatoires absentes du staging : {missing}")
 
-    df = spark.read.parquet(SOURCE_PATH)
+        selected = REQUIRED + [c for c in OPTIONAL if c in df.columns]
+        df = df.select(*selected)
 
-    print("Schema source :")
-    df.printSchema()
+        for field in ("numero", "statut"):
+            if field in df.columns:
+                df = df.withColumn(field, F.trim(F.col(field)))
 
-    print("Nombre de lignes source :", df.count())
-
-    # Nettoyage des champs texte
-    df_clean = df
-
-    for field in ["numero", "statut"]:
-        if field in df_clean.columns:
-            df_clean = df_clean.withColumn(
-                field,
-                trim(col(field))
+        df = (
+            df.withColumn(
+                "montant_total",
+                F.regexp_replace(F.trim(F.col("montant_total").cast("string")), ",", ".")
+                .cast(DecimalType(18, 2)),
             )
+            .withColumn("date_commande", F.to_timestamp(F.col("date_commande")))
+        )
 
-    # Conversion du montant en type numérique
-    df_clean = df_clean.withColumn(
-        "montant_total",
-        regexp_replace(
-            trim(col("montant_total").cast("string")),
-            ",",
-            "."
-        ).cast(DecimalType(18, 2))
-    )
+        is_valid = (
+            F.col("id").isNotNull()
+            & F.col("_company_id").isNotNull()
+            & (F.col("_company_id") > 0)
+            & F.col("montant_total").isNotNull()
+            & (F.col("montant_total") >= 0)
+        )
 
-    print("=" * 60)
-    print("ETAPE 2 - Validation des données")
+        valid = df.filter(is_valid)
+        rejected = df.filter(~is_valid)
 
-    df_valid = df_clean.filter(
-        col("id").isNotNull()
-        & col("_company_id").isNotNull()
-        & (col("_company_id") > 0)
-        & col("montant_total").isNotNull()
-        & (col("montant_total") >= 0)
-    )
+        total, kept = df.count(), valid.count()
+        n_rejected = total - kept
+        print(f"Run {run_id} | source={total} | valides={kept} | rejetees={n_rejected}")
 
-    total_source = df_clean.count()
-    total_valid = df_valid.count()
-    total_rejected = total_source - total_valid
+        if n_rejected:
+            # Trace d'audit : cles seulement, pas de donnees metier.
+            rejected.select("_company_id", "id").write.mode("overwrite").parquet(rejected_path)
 
-    print("Lignes source :", total_source)
-    print("Lignes valides :", total_valid)
-    print("Lignes rejetées :", total_rejected)
+        curated = (
+            valid.withColumn("_run_id", F.lit(run_id))
+            .withColumn("curated_at", F.current_timestamp())
+        )
+        curated.write.mode("overwrite").partitionBy("_company_id").parquet(target_path)
+        print(f"Curated ecrit : {target_path}")
+    finally:
+        spark.stop()
 
-    # Ajout de la date de préparation Curated
-    df_curated = df_valid.withColumn(
-        "curated_at",
-        current_timestamp()
-    )
 
-    print("=" * 60)
-    print("ETAPE 3 - Aperçu des données Curated")
-
-    df_curated.select(
-        "_company_id",
-        "id",
-        "numero",
-        "statut",
-        "montant_total",
-        "curated_at"
-    ).show(truncate=False)
-
-    print("=" * 60)
-    print("ETAPE 4 - Ecriture dans MinIO")
-
-    (
-        df_curated.write
-        .mode("overwrite")
-        .partitionBy("_company_id")
-        .parquet(TARGET_PATH)
-    )
-
-    print("Curated terminé :", TARGET_PATH)
-    print("Nombre de lignes écrites :", total_valid)
-    print("Partitionnement par entreprise : _company_id")
-    print("=" * 60)
-
-finally:
-    spark.stop()
+if __name__ == "__main__":
+    main()

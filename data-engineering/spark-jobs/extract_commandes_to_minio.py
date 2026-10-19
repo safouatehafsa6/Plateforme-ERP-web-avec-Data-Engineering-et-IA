@@ -1,355 +1,220 @@
+"""Etape 1 - Extraction PostgreSQL (une base par entreprise) vers MinIO/raw.
 
+- La liste des entreprises vient de la base centrale (entreprise.statut = 'actif'),
+  plus de liste codee en dur.
+- Seules les tables listees dans PIPELINE_TABLES sont extraites
+  (par defaut : commande) : minimisation des donnees.
+- Les colonnes sensibles (mots de passe, jetons, codes de verification...)
+  ne sont jamais exportees.
+- Connexions en lecture seule. Les fichiers portent le run_id : un run ne
+  touche jamais aux fichiers d'un autre run.
+"""
 import base64
 import json
+import os
 import re
 import tempfile
 from datetime import date, datetime, time
 from decimal import Decimal
-from pathlib import Path
 from uuid import UUID
 
 import psycopg2
+from minio import Minio
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
-from dotenv import dotenv_values
-from minio import Minio
 
-
-# --------------------------------------------------
-# Configuration
-# --------------------------------------------------
-
-config = dotenv_values("/tmp/erp.env")
-
-COMPANIES = [
-    {
-        "company_id": 3,
-        "database": "compte_societe_test_ec11a6c3",
-    },
-    {
-        "company_id": 4,
-        "database": "compte_benjjedou_2061bc82",
-    },
-    {
-        "company_id": 5,
-        "database": "compte_demo_qr_897caff5",
-    },
-]
+from pipeline_common import IDENT_PATTERN, db_settings, get_run_id, minio_settings
 
 BUCKET = "raw"
+SCHEMA = "public"
 BATCH_SIZE = 1000
 
-minio_client = Minio(
-    "minio:9000",
-    access_key=config["MINIO_ROOT_USER"],
-    secret_key=config["MINIO_ROOT_PASSWORD"],
-    secure=False,
-)
+TABLES = [
+    name.strip()
+    for name in os.environ.get("PIPELINE_TABLES", "commande").split(",")
+    if name.strip()
+]
 
-
-# Exclude likely credentials, tokens and verification secrets.
-# Review this list against your actual ERP schema.
 SENSITIVE_COLUMN_PATTERN = re.compile(
-    r"(^|_)(password|passwd|secret|token|"
-    r"api_key|private_key|code_verification|"
-    r"verification_code|reset_token)(_|$)",
+    r"(^|_)(password|passwd|mot_de_passe|motdepasse|secret|token|api_key|"
+    r"private_key|code_verification|verification_code|reset_token|hash|otp)(_|$)",
     re.IGNORECASE,
 )
 
 
-# --------------------------------------------------
-# JSON serialization
-# --------------------------------------------------
-
 def json_default(value):
     if isinstance(value, (datetime, date, time)):
         return value.isoformat()
-
     if isinstance(value, Decimal):
         return str(value)
-
     if isinstance(value, UUID):
         return str(value)
-
-    if isinstance(value, bytes):
-        return base64.b64encode(value).decode("ascii")
-
-    raise TypeError(
-        f"Unsupported type: {type(value).__name__}"
-    )
+    if isinstance(value, (bytes, memoryview)):
+        return base64.b64encode(bytes(value)).decode("ascii")
+    raise TypeError(f"Type non supporte : {type(value).__name__}")
 
 
-# --------------------------------------------------
-# PostgreSQL connection
-# --------------------------------------------------
-
-def connect_database(company):
-    required = ["ERP_DB_USER", "ERP_DB_PASSWORD"]
-
-    missing = [
-        key for key in required
-        if not config.get(key)
-    ]
-
-    if missing:
-        raise RuntimeError(
-            f"Missing .env configuration: {', '.join(missing)}"
-        )
-
+def connect(dbname):
+    cfg = db_settings()
     return psycopg2.connect(
-        host="postgres-erp",
-        port=5432,
-        dbname=company["database"],
-        user=config["ERP_DB_USER"],
-        password=config["ERP_DB_PASSWORD"],
+        host=cfg["host"],
+        port=cfg["port"],
+        dbname=dbname,
+        user=cfg["user"],
+        password=cfg["password"],
         connect_timeout=10,
         options="-c default_transaction_read_only=on",
     )
 
 
-# --------------------------------------------------
-# Discover all application tables
-# --------------------------------------------------
+def list_companies():
+    """Entreprises actives (donc dont la base a ete provisionnee)."""
+    only_ids = {
+        int(value)
+        for value in os.environ.get("PIPELINE_COMPANY_IDS", "").split(",")
+        if value.strip()
+    }
+    conn = connect(db_settings()["central_db"])
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, nom_base FROM entreprise "
+                "WHERE statut = 'actif' ORDER BY id"
+            )
+            companies = [
+                {"company_id": row[0], "database": row[1]} for row in cur.fetchall()
+            ]
+    finally:
+        conn.close()
 
-def discover_tables(conn):
-    with conn.cursor() as cursor:
-        cursor.execute("""
-            SELECT table_schema, table_name
-            FROM information_schema.tables
-            WHERE table_type = 'BASE TABLE'
-              AND table_schema NOT IN (
-                  'information_schema',
-                  'pg_catalog'
-              )
-              AND table_schema NOT LIKE 'pg_toast%%'
-            ORDER BY table_schema, table_name
-        """)
-
-        return cursor.fetchall()
+    if only_ids:
+        companies = [c for c in companies if c["company_id"] in only_ids]
+    return companies
 
 
-# --------------------------------------------------
-# Discover columns, excluding sensitive fields
-# --------------------------------------------------
+def table_exists(conn, table):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = %s AND table_name = %s AND table_type = 'BASE TABLE'",
+            (SCHEMA, table),
+        )
+        return cur.fetchone() is not None
 
-def discover_columns(conn, schema, table):
-    with conn.cursor() as cursor:
-        cursor.execute("""
-            SELECT column_name
-            FROM information_schema.columns
-            WHERE table_schema = %s
-              AND table_name = %s
-            ORDER BY ordinal_position
-        """, (schema, table))
 
-        columns = [
-            row[0] for row in cursor.fetchall()
-        ]
-
-    excluded = [
-        column for column in columns
-        if SENSITIVE_COLUMN_PATTERN.search(column)
-    ]
-
-    included = [
-        column for column in columns
-        if not SENSITIVE_COLUMN_PATTERN.search(column)
-    ]
-
+def exportable_columns(conn, table):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = %s AND table_name = %s ORDER BY ordinal_position",
+            (SCHEMA, table),
+        )
+        columns = [row[0] for row in cur.fetchall()]
+    included = [c for c in columns if not SENSITIVE_COLUMN_PATTERN.search(c)]
+    excluded = [c for c in columns if SENSITIVE_COLUMN_PATTERN.search(c)]
     return included, excluded
 
 
-# --------------------------------------------------
-# Extract one table and upload its JSONL file
-# --------------------------------------------------
-
-def extract_table(conn, company, schema, table, run_id):
-    columns, excluded = discover_columns(
-        conn, schema, table
-    )
-
+def extract_table(conn, minio_client, company, table, run_id):
+    columns, excluded = exportable_columns(conn, table)
     if excluded:
-        print(
-            f"  Sensitive columns excluded: {excluded}"
-        )
-
+        print(f"  Colonnes sensibles exclues : {excluded}")
     if not columns:
-        print(
-            f"  SKIPPED {schema}.{table}: "
-            "no exportable columns"
-        )
-        return None
+        raise RuntimeError(f"{SCHEMA}.{table} : aucune colonne exportable")
 
     query = sql.SQL("SELECT {} FROM {}").format(
-        sql.SQL(", ").join(
-            sql.Identifier(column) for column in columns
-        ),
-        sql.Identifier(schema, table),
+        sql.SQL(", ").join(sql.Identifier(c) for c in columns),
+        sql.Identifier(SCHEMA, table),
     )
 
-    # A temporary file avoids keeping the whole table in RAM.
-    # Large files can spill to disk.
-    with tempfile.SpooledTemporaryFile(
-        max_size=8 * 1024 * 1024,
-        mode="w+b",
-    ) as output:
+    object_name = (
+        f"company_{company['company_id']}/{SCHEMA}/{table}/{table}_{run_id}.jsonl"
+    )
 
+    with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b") as out:
         row_count = 0
+        with conn.cursor(name="extract_cursor", cursor_factory=RealDictCursor) as cur:
+            cur.itersize = BATCH_SIZE
+            cur.execute(query)
+            for row in cur:
+                record = dict(row)
+                record["_source"] = {
+                    "company_id": company["company_id"],
+                    "schema": SCHEMA,
+                    "table": table,
+                }
+                line = json.dumps(record, default=json_default, ensure_ascii=False)
+                out.write((line + "\n").encode("utf-8"))
+                row_count += 1
 
-        with conn.cursor(
-            name="extract_cursor",
-            cursor_factory=RealDictCursor,
-        ) as cursor:
-            cursor.itersize = BATCH_SIZE
-            cursor.execute(query)
-
-            while True:
-                batch = cursor.fetchmany(BATCH_SIZE)
-
-                if not batch:
-                    break
-
-                for row in batch:
-                    record = dict(row)
-
-                    # Preserve the source company and table.
-                    record["_source"] = {
-                        "company_id": company["company_id"],
-                        "database": company["database"],
-                        "schema": schema,
-                        "table": table,
-                    }
-
-                    line = json.dumps(
-                        record,
-                        default=json_default,
-                        ensure_ascii=False,
-                    )
-
-                    output.write(
-                        (line + "\n").encode("utf-8")
-                    )
-
-                    row_count += 1
-
-        size = output.tell()
-        output.seek(0)
-
-        object_name = (
-            f"company_{company['company_id']}/"
-            f"{schema}/{table}/"
-            f"{table}_{run_id}.jsonl"
-        )
-
+        size = out.tell()
+        out.seek(0)
         minio_client.put_object(
-            bucket_name=BUCKET,
-            object_name=object_name,
-            data=output,
+            BUCKET,
+            object_name,
+            data=out,
             length=size,
             content_type="application/x-ndjson",
             part_size=10 * 1024 * 1024,
         )
 
-    print(
-        f"  OK | {schema}.{table} | "
-        f"rows={row_count} | bytes={size}"
-    )
+    print(f"  OK | {SCHEMA}.{table} | lignes={row_count} | octets={size}")
+    return row_count
 
-    print(f"  MinIO: {BUCKET}/{object_name}")
-
-    return {
-        "table": f"{schema}.{table}",
-        "rows": row_count,
-        "object": object_name,
-    }
-
-
-# --------------------------------------------------
-# Main extraction
-# --------------------------------------------------
 
 def main():
-    if not minio_client.bucket_exists(BUCKET):
-        raise RuntimeError(
-            f"MinIO bucket '{BUCKET}' does not exist"
-        )
+    run_id = get_run_id()
 
-    run_id = datetime.now().strftime(
-        "%Y%m%dT%H%M%S"
+    for table in TABLES:
+        if not IDENT_PATTERN.fullmatch(table):
+            raise RuntimeError(f"Nom de table invalide dans PIPELINE_TABLES : {table!r}")
+    if not TABLES:
+        raise RuntimeError("PIPELINE_TABLES est vide.")
+
+    minio_cfg = minio_settings()
+    minio_client = Minio(
+        minio_cfg["endpoint"],
+        access_key=minio_cfg["access_key"],
+        secret_key=minio_cfg["secret_key"],
+        secure=False,
     )
+    if not minio_client.bucket_exists(BUCKET):
+        raise RuntimeError(f"Le bucket MinIO '{BUCKET}' n'existe pas")
 
-    total_tables = 0
-    total_rows = 0
+    companies = list_companies()
+    if not companies:
+        raise RuntimeError("Aucune entreprise active trouvee : extraction impossible.")
+
+    print(f"Run {run_id} | tables : {TABLES} | entreprises actives : {len(companies)}")
+
     errors = []
+    total_rows = 0
 
-    for company in COMPANIES:
-        print("\n" + "=" * 65)
-        print(
-            f"Company {company['company_id']} | "
-            f"Database: {company['database']}"
-        )
-        print("=" * 65)
-
+    for company in companies:
+        print(f"\nEntreprise {company['company_id']}")
         conn = None
-
         try:
-            conn = connect_database(company)
-            tables = discover_tables(conn)
-
-            print(f"Tables discovered: {len(tables)}")
-
-            for schema, table in tables:
+            conn = connect(company["database"])
+            for table in TABLES:
                 try:
-                    result = extract_table(
-                        conn,
-                        company,
-                        schema,
-                        table,
-                        run_id,
-                    )
-
-                    if result is not None:
-                        total_tables += 1
-                        total_rows += result["rows"]
-
+                    if not table_exists(conn, table):
+                        raise RuntimeError(f"table {SCHEMA}.{table} introuvable")
+                    total_rows += extract_table(conn, minio_client, company, table, run_id)
                 except Exception as exc:
-                    error_message = (
-                        f"{company['database']} | "
-                        f"{schema}.{table} | {exc}"
-                    )
-
-                    errors.append(error_message)
-                    print(f"  ERROR: {error_message}")
-
+                    errors.append(f"entreprise {company['company_id']} | {table} | {exc}")
+                    print(f"  ERREUR : {errors[-1]}")
+                    conn.rollback()
         except Exception as exc:
-            error_message = (
-                f"{company['database']} | {exc}"
-            )
-            errors.append(error_message)
-            print(f"DATABASE ERROR: {error_message}")
-
+            errors.append(f"entreprise {company['company_id']} | connexion | {exc}")
+            print(f"  ERREUR : {errors[-1]}")
         finally:
             if conn is not None:
                 conn.close()
 
-    print("\n" + "=" * 65)
-    print("EXTRACTION SUMMARY")
-    print("=" * 65)
-    print(f"Tables uploaded: {total_tables}")
-    print(f"Total rows extracted: {total_rows}")
-    print(f"Errors: {len(errors)}")
-    print(f"Run ID: {run_id}")
-
+    print(f"\nResume : lignes={total_rows} | erreurs={len(errors)} | run_id={run_id}")
     if errors:
-        print("\nSome tables or databases failed:")
-        for error in errors:
-            print(f"- {error}")
-
-        raise RuntimeError(
-            "Extraction incomplete. Review the errors above."
-        )
-
-    print("\nExtraction completed successfully.")
+        raise RuntimeError("Extraction incomplete :\n- " + "\n- ".join(errors))
+    print("Extraction terminee avec succes.")
 
 
 if __name__ == "__main__":

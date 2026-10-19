@@ -2,7 +2,7 @@ import { useLocation, Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
   LayoutDashboard, ShoppingCart, Truck, Boxes, Users,
-  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot,
+  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot, Activity,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { lireSession, estAdminEntreprise, estSuperAdmin } from "../api/session";
@@ -17,6 +17,7 @@ import AssistantIA from "./AssistantIA";
 // plateforme, réservée au Super Administrateur.
 const ITEMS = [
   { icon: LayoutDashboard, label: "tableau_de_bord", chemin: "/dashboard" },
+  { icon: Activity, label: "dashboard_data", chemin: "/dashboard-data", visible: estAdminEntreprise },
   { icon: ShoppingCart, label: "ventes", chemin: "/ventes" },
   { icon: Truck, label: "achats", chemin: "/achats" },
   { icon: Truck, label: "fournisseurs", chemin: "/fournisseurs" },

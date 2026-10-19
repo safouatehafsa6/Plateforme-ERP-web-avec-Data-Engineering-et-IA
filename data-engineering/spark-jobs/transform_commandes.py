@@ -1,18 +1,11 @@
-
-import os
+"""Etape 2 - RAW (JSONL) -> STAGING (Parquet), uniquement pour le run courant."""
 import re
 import sys
 from urllib.parse import urlparse
-from datetime import datetime, timezone
 
-from dotenv import dotenv_values
-from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-
-ENV_PATH = "/tmp/erp.env"
-RAW_PATH = "s3a://raw/"
-STAGING_PATH = "s3a://staging/"
+from pipeline_common import build_spark, get_run_id, lake_uri
 
 
 def safe_name(value):
@@ -20,57 +13,45 @@ def safe_name(value):
 
 
 def get_path_metadata(file_path):
-    parsed = urlparse(file_path)
-    parts = parsed.path.strip("/").split("/")
-
-    company = parts[0] if len(parts) >= 1 else "unknown_company"
-    schema_name = parts[-3] if len(parts) >= 4 else "unknown_schema"
-    table_name = parts[-2] if len(parts) >= 4 else "unknown_table"
-    file_name = parts[-1] if parts else "unknown_file"
-
-    match = re.fullmatch(r"company_(\d+)", company)
-
-    return {
-        "company": company,
-        "company_id": int(match.group(1)) if match else None,
-        "schema": schema_name,
-        "table": table_name,
-        "file": file_name,
-    }
+    """Extrait entreprise / schema / table du chemin company_<id>/<schema>/<table>/<fichier>."""
+    parts = urlparse(file_path).path.strip("/").split("/")
+    for index, part in enumerate(parts):
+        match = re.fullmatch(r"company_(\d+)", part)
+        if match and len(parts) >= index + 4:
+            return {
+                "company": part,
+                "company_id": int(match.group(1)),
+                "schema": parts[index + 1],
+                "table": parts[index + 2],
+                "file": parts[-1],
+            }
+    raise ValueError(f"Chemin brut inattendu (company_<id>/<schema>/<table>/<fichier>) : {file_path}")
 
 
-def discover_jsonl_files(spark, root_path):
+def discover_run_files(spark, root_path, run_id):
+    """Fichiers JSONL du run courant uniquement."""
     jvm = spark.sparkContext._jvm
-    hadoop_conf = spark.sparkContext._jsc.hadoopConfiguration()
-
+    conf = spark.sparkContext._jsc.hadoopConfiguration()
     root = jvm.org.apache.hadoop.fs.Path(root_path)
-    fs = root.getFileSystem(hadoop_conf)
+    fs = root.getFileSystem(conf)
 
-    discovered = []
-    pending = [root]
-
+    suffix = f"_{run_id}.jsonl"
+    found, pending = [], [root]
     while pending:
         current = pending.pop()
-
         for status in fs.listStatus(current):
             path = status.getPath()
-
             if status.isDirectory():
                 pending.append(path)
-            elif path.getName().lower().endswith(".jsonl"):
-                discovered.append(path.toString())
-
-    return sorted(discovered)
+            elif path.getName().endswith(suffix):
+                found.append(path.toString())
+    return sorted(found)
 
 
 def transform_dataframe(df, metadata, run_id):
     for column_name, data_type in df.dtypes:
         if data_type == "string":
-            df = df.withColumn(
-                column_name,
-                F.trim(F.col(column_name))
-            )
-
+            df = df.withColumn(column_name, F.trim(F.col(column_name)))
     return (
         df.withColumn("_company_id", F.lit(metadata["company_id"]).cast("integer"))
         .withColumn("_company", F.lit(metadata["company"]))
@@ -83,145 +64,71 @@ def transform_dataframe(df, metadata, run_id):
 
 
 def main():
-    config = dotenv_values(ENV_PATH)
+    run_id = get_run_id()
+    raw_root = lake_uri("raw")
+    staging_root = lake_uri("staging")
 
-    access_key = config.get("MINIO_ROOT_USER")
-    secret_key = config.get("MINIO_ROOT_PASSWORD")
+    spark = build_spark("ERP-JSONL-to-Parquet")
+    errors, transformed, skipped, total_rows = [], 0, 0, 0
 
-    if not access_key or not secret_key:
-        raise RuntimeError(
-            f"Identifiants MinIO manquants dans {ENV_PATH}"
-        )
+    try:
+        files = discover_run_files(spark, raw_root, run_id)
+        print(f"Run {run_id} : {len(files)} fichier(s) JSONL a transformer")
+        if not files:
+            raise RuntimeError(f"Aucun fichier brut trouve pour le run {run_id}.")
 
-    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        jvm = spark.sparkContext._jvm
+        conf = spark.sparkContext._jsc.hadoopConfiguration()
 
-    spark = (
-        SparkSession.builder
-        .appName("ERP-JSONL-to-Parquet")
-        .config("spark.hadoop.fs.s3a.endpoint", "http://minio:9000")
-        .config("spark.hadoop.fs.s3a.access.key", access_key)
-        .config("spark.hadoop.fs.s3a.secret.key", secret_key)
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config(
-            "spark.hadoop.fs.s3a.impl",
-            "org.apache.hadoop.fs.s3a.S3AFileSystem"
-        )
-        .config(
-            "spark.hadoop.fs.s3a.connection.ssl.enabled",
-            "false"
-        )
-        .getOrCreate()
+        for source_path in files:
+            try:
+                source = jvm.org.apache.hadoop.fs.Path(source_path)
+                if source.getFileSystem(conf).getFileStatus(source).getLen() == 0:
+                    skipped += 1
+                    print(f"[VIDE] {source_path}")
+                    continue
+
+                metadata = get_path_metadata(source_path)
+                df = (
+                    spark.read.option("mode", "FAILFAST")
+                    .option("multiLine", "false")
+                    .json(source_path)
+                )
+                if not df.columns:
+                    raise ValueError("Aucune colonne detectee dans un fichier non vide")
+
+                row_count = df.count()
+                if row_count == 0:
+                    skipped += 1
+                    print(f"[SANS DONNEES] {source_path}")
+                    continue
+
+                df = transform_dataframe(df, metadata, run_id)
+                base_name = metadata["file"].removesuffix(".jsonl")
+                output_path = (
+                    f"{staging_root}/{safe_name(metadata['company'])}/"
+                    f"{safe_name(metadata['schema'])}/{safe_name(metadata['table'])}/"
+                    f"{safe_name(base_name)}"
+                )
+                # Chemin propre au run : l'ecraser ne touche que ce run
+                # (permet a Airflow de relancer la tache sans erreur).
+                df.write.mode("overwrite").parquet(output_path)
+
+                transformed += 1
+                total_rows += row_count
+                print(f"[OK] {metadata['company']} / {metadata['table']} : {row_count} lignes")
+            except Exception as exc:
+                errors.append(f"{source_path}: {type(exc).__name__}: {exc}")
+                print(f"[ERREUR] {errors[-1]}", file=sys.stderr)
+    finally:
+        spark.stop()
+
+    print(
+        f"\nResume : fichiers transformes={transformed} | vides={skipped} | "
+        f"erreurs={len(errors)} | lignes={total_rows} | run_id={run_id}"
     )
-
-    spark.sparkContext.setLogLevel("WARN")
-
-    discovered = discover_jsonl_files(spark, RAW_PATH)
-
-    print(f"Fichiers JSONL découverts : {len(discovered)}")
-
-    transformed_files = 0
-    skipped_empty_files = 0
-    failed_files = 0
-    total_rows = 0
-    errors = []
-
-    jvm = spark.sparkContext._jvm
-    hadoop_conf = spark.sparkContext._jsc.hadoopConfiguration()
-
-    for source_path in discovered:
-        try:
-            source = jvm.org.apache.hadoop.fs.Path(source_path)
-            fs = source.getFileSystem(hadoop_conf)
-            file_size = fs.getFileStatus(source).getLen()
-
-            if file_size == 0:
-                skipped_empty_files += 1
-                print(f"[VIDE] {source_path}")
-                continue
-
-            metadata = get_path_metadata(source_path)
-
-            df = (
-                spark.read
-                .option("mode", "FAILFAST")
-                .option("multiLine", "false")
-                .json(source_path)
-            )
-
-            if not df.columns:
-                raise ValueError(
-                    "Aucune colonne détectée dans un fichier non vide"
-                )
-
-            row_count = df.count()
-
-            if row_count == 0:
-                skipped_empty_files += 1
-                print(f"[SANS DONNÉES] {source_path}")
-                continue
-
-            df = transform_dataframe(df, metadata, run_id)
-
-            # Chemin distinct par entreprise, schéma, table et fichier.
-            base_name = (
-                metadata["file"][:-6]
-                if metadata["file"].endswith(".jsonl")
-                else metadata["file"]
-            )
-
-            output_path = (
-                f"{STAGING_PATH.rstrip('/')}/"
-                f"{safe_name(metadata['company'])}/"
-                f"{safe_name(metadata['schema'])}/"
-                f"{safe_name(metadata['table'])}/"
-                f"{safe_name(base_name)}"
-            )
-
-            # Ne pas écraser une sortie existante.
-            output = jvm.org.apache.hadoop.fs.Path(output_path)
-            output_fs = output.getFileSystem(hadoop_conf)
-
-            if output_fs.exists(output):
-                raise FileExistsError(
-                    f"Le chemin de sortie existe déjà : {output_path}"
-                )
-
-            (
-                df.write
-                .mode("errorifexists")
-                .parquet(output_path)
-            )
-
-            transformed_files += 1
-            total_rows += row_count
-
-            print(
-                f"[OK] {metadata['company']} / "
-                f"{metadata['table']} : {row_count} lignes"
-            )
-            print(f"     Sortie : {output_path}")
-
-        except Exception as exc:
-            failed_files += 1
-            message = f"{source_path}: {type(exc).__name__}: {exc}"
-            errors.append(message)
-            print(f"[ERREUR] {message}", file=sys.stderr)
-
-    print("\n========== RÉSUMÉ ==========")
-    print(f"Fichiers découverts : {len(discovered)}")
-    print(f"Fichiers transformés : {transformed_files}")
-    print(f"Fichiers vides ignorés : {skipped_empty_files}")
-    print(f"Fichiers en erreur : {failed_files}")
-    print(f"Total des lignes écrites : {total_rows}")
-    print(f"Run ID : {run_id}")
-
-    spark.stop()
-
-    if failed_files:
-        raise RuntimeError(
-            f"{failed_files} fichier(s) n'ont pas été transformés. "
-            "Consulte les erreurs ci-dessus."
-        )
+    if errors:
+        raise RuntimeError(f"{len(errors)} fichier(s) non transformes :\n- " + "\n- ".join(errors))
 
 
 if __name__ == "__main__":

@@ -73,6 +73,15 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       SMTP_FROM: no-reply@erp-plateforme.exemple
+      # Pipeline Data Engineering (bouton Dashboard)
+      AIRFLOW_API_URL: http://airflow-webserver:8080/api/v1
+      AIRFLOW_API_USER: admin
+      AIRFLOW_API_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD:-admin}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_password}
+      STREAMLIT_PUBLIC_URL: http://localhost:8501
+      DASHBOARD_TOKEN_SECRET: ${DASHBOARD_TOKEN_SECRET:?Ajoutez DASHBOARD_TOKEN_SECRET dans le fichier .env}
     ports:
       - "8000:8000"
     networks:
@@ -105,6 +114,31 @@ services:
       - backend
     ports:
       - "3000:3000"
+    networks:
+      - erp-network
+
+  # ------------------------------------------------------------------------
+  # DASHBOARD ANALYTIQUE (Streamlit + Plotly) sur le dernier CURATED valide
+  # Interface : http://localhost:8501
+  # ------------------------------------------------------------------------
+  analytics-dashboard:
+    build: ./analytics
+    container_name: erp-analytics-dashboard
+    restart: unless-stopped
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_password}
+      LAKE_CURATED_BUCKET: curated
+      MINIO_SECURE: "false"
+      DASHBOARD_TOKEN_SECRET: ${DASHBOARD_TOKEN_SECRET:?Ajoutez DASHBOARD_TOKEN_SECRET dans le fichier .env}
+    depends_on:
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - "8501:8501"
     networks:
       - erp-network
 
@@ -203,9 +237,9 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__API__AUTH_BACKENDS: airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - spark-client:/opt/spark
       - ./data-engineering/spark-jobs:/opt/spark/jobs
     ports:
       - "8080:8080"
@@ -225,9 +259,16 @@ services:
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # Variables lues par les jobs du pipeline (valeurs issues du .env)
+      ERP_DB_HOST: postgres-erp
+      ERP_DB_USER: ${ERP_DB_USER:-erp_user}
+      ERP_DB_PASSWORD: ${ERP_DB_PASSWORD:-erp_password}
+      ERP_DB_NAME: ${ERP_DB_NAME:-erp_db}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_password}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
-      - spark-client:/opt/spark
       - ./data-engineering/spark-jobs:/opt/spark/jobs
     command: scheduler
     networks:
@@ -291,11 +332,3 @@ services:
 # 3. Creez un fichier .env a la racine (copie de .env.example) avant de
 #    lancer, pour ne pas dependre des valeurs par defaut en dur.
 # ==========================================================================
-
-
-
-
-
-
-
-

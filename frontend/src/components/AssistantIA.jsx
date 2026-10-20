@@ -58,7 +58,7 @@ export default function AssistantIA({ open, onClose }) {
         setState(data.state);
       }
       if (!res.ok) throw new Error(data.detail || "assistant_error");
-      setMessages((m) => [...m, { role:"assistant", text:data.reply }]);
+      setMessages((m) => [...m, { role:"assistant", text:data.reply, sources:Array.isArray(data.sources) ? data.sources : [] }]);
     } catch (err) {
       const fallback = langue === "ar" ? "تعذر الاتصال بالمساعد حالياً." : langue === "en" ? "The assistant could not be reached right now." : "Impossible de contacter l’assistant pour le moment.";
       setMessages((m) => [...m, { role:"assistant", text:fallback }]);
@@ -75,7 +75,7 @@ export default function AssistantIA({ open, onClose }) {
     </header>
     <div className="assistant-panel__langues">{LANGUES.map((l)=><button key={l.code} type="button" className={langue===l.code?"actif":""} onClick={()=>setLangue(l.code)} aria-pressed={langue===l.code}>{l.label}</button>)}</div>
     <div className="assistant-panel__messages">
-      {messages.map((m,i)=><div key={i} className={`assistant-message assistant-message--${m.role}`}>{m.text}</div>)}
+      {messages.map((m,i)=><div key={i} className={`assistant-message assistant-message--${m.role}`}><div>{m.text}</div>{m.role==="assistant" && m.sources?.length>0 && <div className="assistant-sources"><strong>{langue==="en"?"Sources":langue==="ar"?"المصادر":"Sources"}</strong>{m.sources.map((source,j)=><details key={`${source.id}-${j}`}><summary>[{j+1}] {source.title} · {source.source}</summary><small>{source.module}</small><p>{source.excerpt}</p></details>)}</div>}</div>)}
       {sending && <div className="assistant-message assistant-message--assistant">…</div>}
       {messages.length <= 1 && <div className="assistant-panel__suggestions">{ui.suggestions.map((s)=><button key={s} type="button" onClick={()=>setInput(s)}>{s}</button>)}</div>}
     </div>

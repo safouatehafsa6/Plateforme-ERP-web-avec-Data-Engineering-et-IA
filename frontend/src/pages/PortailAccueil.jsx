@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LogOut, Download, CreditCard } from "lucide-react";
 import { API_BASE_URL } from "../api/config";
+import { deconnecter } from "../api/sessionsApi";
 
 function headersAuth() {
   const token = localStorage.getItem("token");
@@ -99,8 +100,8 @@ export default function PortailAccueil() {
     }
   }
 
-  function deconnexion() {
-    localStorage.removeItem("token");
+    async function deconnexion() {
+    await deconnecter();
     navigate("/");
   }
 

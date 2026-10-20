@@ -2,10 +2,11 @@ import { useLocation, Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
   LayoutDashboard, ShoppingCart, Truck, Boxes, Users,
-  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot, Activity,
+  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot, Activity, Monitor,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { lireSession, estAdminEntreprise, estSuperAdmin } from "../api/session";
+import { deconnecter } from "../api/sessionsApi";
 import AssistantIA from "./AssistantIA";
 
 // `visible` décide si l'entrée apparaît selon le profil connecté.
@@ -45,9 +46,11 @@ export default function Sidebar() {
     return featureState[label] !== false;
   });
 
-  function deconnexion(e) {
+  // Déconnexion réelle : la session est fermée côté serveur (le jeton
+  // devient inutilisable), puis le jeton local est supprimé.
+  async function deconnexion(e) {
     e.preventDefault();
-    localStorage.removeItem("token");
+    await deconnecter();
     navigate("/");
   }
 
@@ -77,6 +80,13 @@ export default function Sidebar() {
       </div>
 
       <div className="app-sidebar__bas">
+        <Link
+          to="/appareils"
+          className={`app-sidebar__item${location.pathname === "/appareils" ? " app-sidebar__item--actif" : ""}`}
+        >
+          <Monitor size={18} strokeWidth={1.75} />
+          <span>Mes appareils</span>
+        </Link>
         <Link
           to="/parametres"
           className={`app-sidebar__item${location.pathname === "/parametres" ? " app-sidebar__item--actif" : ""}`}

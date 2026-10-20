@@ -4,6 +4,7 @@ from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.db import pool_central
+from app.security.sessions import verifier_session
 
 securite = HTTPBearer()
 
@@ -12,7 +13,7 @@ def obtenir_utilisateur_courant(
     identifiants: HTTPAuthorizationCredentials = Depends(securite),
 ) -> dict:
     try:
-        return jwt.decode(
+        charge = jwt.decode(
             identifiants.credentials,
             os.environ["JWT_SECRET"],
             algorithms=["HS256"],
@@ -21,6 +22,11 @@ def obtenir_utilisateur_courant(
         raise HTTPException(status_code=401, detail="Session expirée, veuillez vous reconnecter.")
     except (jwt.InvalidTokenError, KeyError):
         raise HTTPException(status_code=401, detail="Token invalide.")
+
+    # La signature est valide : on vérifie aussi que la session n'a pas
+    # été fermée (déconnexion, révocation).
+    verifier_session(charge)
+    return charge
 
 
 def exiger_super_admin(

@@ -21,6 +21,7 @@ import Parametres from "./pages/Parametres";
 import Facturation from "./pages/Facturation";
 import Comptabilite from "./pages/Comptabilite";
 import DashboardData from "./pages/DashboardData";
+import Appareils from "./pages/Appareils";
 
 // Le Header est rendu une seule fois ici, en dehors des <Routes> :
 // il reste donc affiché en continu quelle que soit la page consultée,
@@ -36,7 +37,8 @@ export default function App() {
             <Route path="/inscription" element={<Inscription />} />
             <Route path="/mot-de-passe-oublie" element={<MotDePasseOublie />} />
             <Route path="/dashboard" element={<TableauDeBord />} />
-            <Route path="/dashboard-data" element={<DashboardData />} />
+            <Route path="/dashboard-data" element={<DashboardData />} />          
+            <Route path="/appareils" element={<Appareils />} />
             <Route path="/ventes" element={<Ventes />} />
             <Route path="/achats" element={<Achats />} />
             <Route path="/fournisseurs" element={<Fournisseurs />} />

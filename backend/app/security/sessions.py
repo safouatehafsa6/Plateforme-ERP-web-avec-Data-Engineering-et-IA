@@ -5,6 +5,7 @@ Toutes les sessions sont stockees dans la base centrale
 (table session_utilisateur, voir 006_sessions_utilisateur.sql), pour les
 trois profils : plateforme (super admin), interne et externe.
 """
+import ipaddress
 import os
 import re
 import uuid
@@ -21,6 +22,21 @@ DUREE_SESSION = timedelta(hours=8)
 INTERVALLE_ACTIVITE = timedelta(seconds=60)
 
 
+def _lire_entier_env(nom, defaut, minimum, maximum):
+    try:
+        valeur = int(os.getenv(nom, str(defaut)))
+    except ValueError:
+        return defaut
+    return max(minimum, min(maximum, valeur))
+
+
+# Nombre maximal de sessions actives par utilisateur : au-dela, la plus
+# ancienne est revoquee a la connexion (motif : limite_sessions).
+MAX_SESSIONS_PAR_UTILISATEUR = _lire_entier_env("MAX_SESSIONS_PAR_UTILISATEUR", 5, 1, 50)
+# Nombre de reverse proxies de confiance devant le backend (si TRUST_PROXY=1).
+NB_PROXIES_CONFIANCE = _lire_entier_env("TRUST_PROXY_HOPS", 1, 1, 5)
+
+
 def adresse_ip(request: Request) -> str | None:
     # Derriere un reverse proxy (nginx, Traefik...), l'IP reelle est dans
     # X-Forwarded-For. On ne lui fait confiance que si TRUST_PROXY=1,
@@ -28,7 +44,14 @@ def adresse_ip(request: Request) -> str | None:
     if os.getenv("TRUST_PROXY", "0") == "1":
         transfere = request.headers.get("x-forwarded-for")
         if transfere:
-            return transfere.split(",")[0].strip()[:45]
+            # On prend le saut ajoute par NOTRE proxy (en partant de la droite) :
+            # les entrees de gauche sont fournies par le client, donc falsifiables.
+            sauts = [s.strip() for s in transfere.split(",") if s.strip()]
+            if len(sauts) >= NB_PROXIES_CONFIANCE:
+                try:
+                    return str(ipaddress.ip_address(sauts[-NB_PROXIES_CONFIANCE]))
+                except ValueError:
+                    pass
     return request.client.host if request.client else None
 
 
@@ -86,6 +109,29 @@ def emettre_jeton(claims: dict, request: Request) -> str:
             # Nettoyage opportuniste : historique conserve 30 jours.
             cur.execute(
                 "DELETE FROM session_utilisateur WHERE expire_le < NOW() - INTERVAL '30 days'"
+            )
+            # Plafond de sessions simultanees. Le verrou (leve au commit) evite que
+            # deux connexions simultanees depassent la limite.
+            cle_utilisateur = "{}|{}|{}".format(claims["type"], claims["id"], entreprise_id)
+            cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (cle_utilisateur,))
+            cur.execute(
+                """
+                UPDATE session_utilisateur
+                SET revoquee_le = NOW(), motif_revocation = 'limite_sessions'
+                WHERE jti IN (
+                    SELECT jti FROM session_utilisateur
+                    WHERE type_compte = %s AND utilisateur_id = %s
+                      AND entreprise_id IS NOT DISTINCT FROM %s
+                      AND revoquee_le IS NULL AND expire_le > NOW()
+                    ORDER BY cree_le DESC
+                    OFFSET %s
+                )
+                """,
+                (
+                    claims["type"], str(claims["id"]),
+                    str(entreprise_id) if entreprise_id is not None else None,
+                    MAX_SESSIONS_PAR_UTILISATEUR - 1,
+                ),
             )
             cur.execute(
                 """

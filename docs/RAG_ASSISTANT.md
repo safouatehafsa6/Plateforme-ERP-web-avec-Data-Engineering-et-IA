@@ -1,17 +1,19 @@
 # RAG local de l'Assistant ERP
 
 ## Fonctionnement
-- Sans clé API ni modèle externe : recherche plein texte PostgreSQL (`simple`) sur les fragments de documents.
+- Le texte des PDF/DOCX est extrait puis découpé en fragments avec chevauchement.
+- Les embeddings multilingues sont calculés localement dans le backend avec FastEmbed (`intfloat/multilingual-e5-small`). La recherche compare la similarité cosinus des vecteurs; aucun service d'embeddings externe n'est appelé.
+- Au premier lancement, le modèle peut être téléchargé une fois et conservé dans le volume Docker `rag_model_cache`; ensuite, calcul et recherche sont locaux.
 - Les fragments sont stockés dans `assistant_document_chunk` dans la base de chaque entreprise : les recherches ne traversent jamais les bases des autres entreprises.
 - Chaque fragment porte un `module`. Avant d'afficher un résultat, l'API vérifie la permission RBAC `consulter` sur ce module. Les comptes externes ne reçoivent pas les fragments.
 - L'API `/api/assistant/chat` retourne `sources` avec titre, origine, module et extrait. `AssistantIA.jsx` les affiche sous la réponse.
-- La réponse RAG cite les passages retrouvés; ce n'est pas une génération par LLM. Si aucun passage autorisé ne correspond, l'assistant conserve son comportement habituel.
+- Si `RAG_LLM_BASE_URL` et `RAG_LLM_MODEL` sont configurés, les passages récupérés alimentent une génération de réponse via un endpoint compatible OpenAI. Sans configuration, les extraits et leurs sources sont affichés directement. Si aucun passage autorisé ne correspond, l'assistant conserve son comportement habituel.
 
 ## Installation
-1. Exécuter `backend/database/tenant-template/013_assistant_rag.sql` dans chaque base entreprise déjà créée.
-2. Pour importer un document, le découper en fragments de taille raisonnable (par exemple 500 à 1 000 caractères avec un léger chevauchement), puis insérer chaque fragment dans `assistant_document_chunk`.
-3. La colonne `module` doit être un module déjà géré par les permissions ERP (`ventes`, `achats`, `clients`, `fournisseurs`, `stock`, `facturation`, `comptabilite`, etc.). Pour documents généraux, configurer aussi le module et la permission `documents.consulter` dans le système RBAC avant de les utiliser.
-4. Redémarrer le backend et le frontend après migration.
+1. Reconstruire le backend pour installer `fastembed`.
+2. Pour les bases entreprise déjà créées, appliquer les migrations `013_assistant_rag.sql`, `014_assistant_documents.sql`, `015_documents_permissions.sql` et `016_assistant_rag_embeddings.sql` dans cet ordre. Le code tente aussi d'ajouter les colonnes d'embedding de façon idempotente lors d'une requête/import.
+3. Importer les documents via le trombone dans l'assistant. Les fragments et leurs vecteurs sont enregistrés automatiquement.
+4. Poser une question au sujet du contenu. Les sources apparaissent sous la réponse; il ne faut pas réimporter le même fichier à chaque question.
 
 ## Exemple d'insertion
 ```sql
@@ -30,4 +32,4 @@ VALUES
 - Vérifier dans une seconde base entreprise que le fragment de la première entreprise n'est jamais retourné.
 
 ## Limites
-Cette première version est un RAG sans embeddings : elle utilise la recherche lexicale PostgreSQL et peut manquer les synonymes. L'ingestion automatique PDF/DOCX/OCR et la découpe des documents sont une prochaine étape distincte.
+Le classement sémantique est local. La génération par LLM est facultative et configurable via un endpoint compatible OpenAI. Pour les très grands corpus, remplacer la comparaison en mémoire par pgvector ou un moteur vectoriel local. L'OCR des PDF scannés n'est pas pris en charge.

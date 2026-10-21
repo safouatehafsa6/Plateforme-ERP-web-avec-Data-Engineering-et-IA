@@ -19,6 +19,9 @@ SCRIPTS_SCHEMA_ENTREPRISE = [
     os.path.join(DOSSIER_TEMPLATE, "010_code_verification_facture.sql"),
     os.path.join(DOSSIER_TEMPLATE, "011_ventes_metier.sql"),
     os.path.join(DOSSIER_TEMPLATE, "012_achats_metier.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "013_assistant_rag.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "014_assistant_documents.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "016_assistant_rag_embeddings.sql"),
 ]
 
 # Scripts appliqués APRÈS la création du schéma, dans cet ordre. Ils
@@ -27,6 +30,7 @@ SCRIPTS_SCHEMA_ENTREPRISE = [
 # « Rôles & Permissions » s'affiche vide.
 SCRIPTS_SEED_ENTREPRISE = [
     os.path.join(DOSSIER_TEMPLATE, "008_roles_permissions_preconfigures.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "015_documents_permissions.sql"),
 ]
 
 

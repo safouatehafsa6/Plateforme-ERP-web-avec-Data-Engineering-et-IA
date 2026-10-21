@@ -1587,3 +1587,21 @@ a {
 .appareils-badge { margin-left: 8px; padding: 2px 8px; border-radius: 999px; font-size: 0.75rem; background: #1f9d55; color: #fff; }
 .appareils-badge--neutre { background: #6b7280; }
 .appareils-info { padding: 10px 14px; border-radius: 8px; background: rgba(31,157,85,.12); margin-bottom: 12px; }
+
+.assistant-docs { display:flex; flex-direction:column; gap:.4rem; padding:.7rem .75rem; border-bottom:1px solid var(--paper-line); background:var(--paper); max-height:45%; overflow-y:auto; font-size:.76rem; }
+.assistant-docs small { color:var(--text-muted); font-size:.68rem; }
+.assistant-docs__form { display:flex; flex-direction:column; gap:.35rem; }
+.assistant-docs__form input[type="text"] { border:1px solid var(--paper-line); border-radius:6px; background:var(--carte-fond); color:var(--text-dark); padding:.4rem .5rem; font:inherit; font-size:.74rem; }
+.assistant-docs__form input[type="file"] { font-size:.7rem; max-width:100%; }
+.assistant-docs__form button { align-self:flex-start; display:inline-flex; align-items:center; gap:.35rem; border:0; border-radius:6px; background:var(--brass); color:#fff; padding:.4rem .7rem; cursor:pointer; font-size:.74rem; }
+.assistant-docs__form button:disabled { opacity:.5; cursor:not-allowed; }
+.assistant-docs__msg { margin:0; padding:.35rem .5rem; border-radius:6px; }
+.assistant-docs__msg--ok { background:color-mix(in srgb, #2e7d32 14%, transparent); }
+.assistant-docs__msg--err { background:color-mix(in srgb, #c62828 14%, transparent); }
+.assistant-docs__liste { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:.25rem; }
+.assistant-docs__liste li { display:flex; align-items:center; gap:.4rem; }
+.assistant-docs__liste li span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.assistant-docs__liste button { border:0; background:transparent; color:var(--text-muted); cursor:pointer; }
+.assistant-docs__vide { color:var(--text-muted); }
+.assistant-docs__spin { animation: assistant-docs-spin 1s linear infinite; }
+@keyframes assistant-docs-spin { to { transform: rotate(360deg); } }

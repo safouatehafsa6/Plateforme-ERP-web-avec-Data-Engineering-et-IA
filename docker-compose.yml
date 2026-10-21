@@ -80,6 +80,9 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_password}
+      MINIO_SECURE: "false"
+      RAG_BUCKET: rag-documents
+      RAG_EMBEDDING_CACHE: /root/.cache/fastembed
       STREAMLIT_PUBLIC_URL: http://localhost:8501
       DASHBOARD_TOKEN_SECRET: ${DASHBOARD_TOKEN_SECRET:?Ajoutez DASHBOARD_TOKEN_SECRET dans le fichier .env}
     ports:
@@ -182,6 +185,7 @@ services:
       mc mb -p local/raw;
       mc mb -p local/staging;
       mc mb -p local/curated;
+      mc mb -p local/rag-documents;
       exit 0;
       "
 

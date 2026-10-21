@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Bot, X, Trash2, Send, Sparkles } from "lucide-react";
+import { Bot, X, Trash2, Send, Sparkles, Paperclip } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { API_BASE_URL } from "../api/config";
+import DocumentsRag from "./DocumentsRag";
 
 const LANGUES = [
   { code: "fr", label: "FR" },
@@ -32,6 +33,7 @@ export default function AssistantIA({ open, onClose }) {
   const [sending, setSending] = useState(false);
 
   const [state, setState] = useState({ operation: null, step: null, data: {} });
+  const [docsOpen, setDocsOpen] = useState(false);
   const module = useMemo(() => getModule(location.pathname), [location.pathname]);
   const ui = TEXTES[langue];
   const rtl = langue === "ar";
@@ -71,9 +73,10 @@ export default function AssistantIA({ open, onClose }) {
   return <section className={`assistant-panel${rtl ? " assistant-panel--rtl" : ""}`} dir={rtl ? "rtl" : "ltr"} aria-label={ui.title}>
     <header className="assistant-panel__header">
       <div className="assistant-panel__titre"><span className="assistant-panel__icone"><Sparkles size={16}/></span><div><strong>{ui.title}</strong><small>{ui.context}: {module}</small></div></div>
-      <div className="assistant-panel__actions"><button type="button" onClick={effacer} title={ui.clear} aria-label={ui.clear}><Trash2 size={16}/></button><button type="button" onClick={onClose} title={ui.close} aria-label={ui.close}><X size={18}/></button></div>
+      <div className="assistant-panel__actions"><button type="button" onClick={()=>setDocsOpen(v=>!v)} title="Documents" aria-label="Documents" aria-pressed={docsOpen}><Paperclip size={16}/></button><button type="button" onClick={effacer} title={ui.clear} aria-label={ui.clear}><Trash2 size={16}/></button><button type="button" onClick={onClose} title={ui.close} aria-label={ui.close}><X size={18}/></button></div>
     </header>
     <div className="assistant-panel__langues">{LANGUES.map((l)=><button key={l.code} type="button" className={langue===l.code?"actif":""} onClick={()=>setLangue(l.code)} aria-pressed={langue===l.code}>{l.label}</button>)}</div>
+    {docsOpen && <DocumentsRag langue={langue} />}
     <div className="assistant-panel__messages">
       {messages.map((m,i)=><div key={i} className={`assistant-message assistant-message--${m.role}`}><div>{m.text}</div>{m.role==="assistant" && m.sources?.length>0 && <div className="assistant-sources"><strong>{langue==="en"?"Sources":langue==="ar"?"المصادر":"Sources"}</strong>{m.sources.map((source,j)=><details key={`${source.id}-${j}`}><summary>[{j+1}] {source.title} · {source.source}</summary><small>{source.module}</small><p>{source.excerpt}</p></details>)}</div>}</div>)}
       {sending && <div className="assistant-message assistant-message--assistant">…</div>}

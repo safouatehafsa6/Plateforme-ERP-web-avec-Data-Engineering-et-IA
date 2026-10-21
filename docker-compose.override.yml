@@ -10,6 +10,7 @@ volumes:
   pg_airflow_data:
   minio_data:
   metabase_data:
+  rag_model_cache:
 
 services:
   # Base de donnees ERP
@@ -62,6 +63,7 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/database:/app/database
+      - rag_model_cache:/root/.cache/fastembed
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Mailpit - emails de developpement
@@ -131,6 +133,7 @@ services:
       mc mb -p local/raw;
       mc mb -p local/staging;
       mc mb -p local/curated;
+      mc mb -p local/rag-documents;
       exit 0;
       "
 

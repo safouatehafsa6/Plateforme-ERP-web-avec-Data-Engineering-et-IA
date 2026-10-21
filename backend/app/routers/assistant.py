@@ -1,20 +1,9 @@
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from decimal import Decimal
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import utilisateur_connecte
-
-import io
-import os
-import re
-import uuid
-import hashlib
-from pathlib import Path
-
-from minio import Minio
-from pypdf import PdfReader
-from docx import Document
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
@@ -60,13 +49,11 @@ def _has_permission(user, module, action="consulter"):
         return True
 
     uid = user.get("id")
-
     if not uid or not user.get("nomBase") or user.get("type") == "externe":
         return False
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -91,16 +78,14 @@ def _has_permission(user, module, action="consulter"):
 def _denied(langue, module, action="consulter"):
     if langue == "en":
         return (
-            "I cannot perform this operation because your account "
-            f"does not have the required permission ({module}.{action})."
+            "I cannot perform this operation because your account does not "
+            f"have the required permission ({module}.{action})."
         )
-
     if langue == "ar":
         return (
             "لا يمكنني تنفيذ هذه العملية لأن حسابك لا يملك "
             f"الصلاحية المطلوبة ({module}.{action})."
         )
-
     return (
         "Je ne peux pas effectuer cette opération car votre compte "
         f"ne possède pas la permission requise ({module}.{action})."
@@ -108,9 +93,10 @@ def _denied(langue, module, action="consulter"):
 
 
 def _entity_meta(entity):
-    return ("clients", "client") if entity == "client" else (
-        "fournisseurs",
-        "fournisseur",
+    return (
+        ("clients", "client")
+        if entity == "client"
+        else ("fournisseurs", "fournisseur")
     )
 
 
@@ -121,7 +107,6 @@ def _create_entity(user, entity, data):
         raise HTTPException(403, _denied("fr", module, "creer"))
 
     nom = (data.get("nom") or "").strip()
-
     if not nom:
         raise HTTPException(422, "Le nom est obligatoire.")
 
@@ -132,19 +117,15 @@ def _create_entity(user, entity, data):
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT 1 FROM {table} "
-                "WHERE LOWER(nom) = LOWER(%s) LIMIT 1",
+                f"SELECT 1 FROM {table} WHERE LOWER(nom)=LOWER(%s) LIMIT 1",
                 (nom,),
             )
-
             if cur.fetchone():
                 raise HTTPException(
-                    409,
-                    f"Un {entity} portant ce nom existe déjà.",
+                    409, f"Un {entity} portant ce nom existe déjà."
                 )
 
             cur.execute(
@@ -155,17 +136,14 @@ def _create_entity(user, entity, data):
                 """,
                 (nom, vals["email"], vals["telephone"], vals["adresse"]),
             )
-
             row = cur.fetchone()
             result = dict(zip([d[0] for d in cur.description], row))
 
         conn.commit()
         return result
-
     except Exception:
         conn.rollback()
         raise
-
     finally:
         pool.putconn(conn)
 
@@ -177,13 +155,11 @@ def _find_entity(user, entity, query):
         raise HTTPException(403, _denied("fr", module, "consulter"))
 
     q = (query or "").strip()
-
     if not q:
         return []
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -198,15 +174,12 @@ def _find_entity(user, entity, query):
                 """,
                 (f"%{q}%", f"%{q}%", f"%{q}%"),
             )
-
             rows = cur.fetchall()
             cols = [d[0] for d in cur.description]
-
             return [
                 dict(zip(cols, [_fmt(v) for v in row]))
                 for row in rows
             ]
-
     finally:
         pool.putconn(conn)
 
@@ -218,49 +191,41 @@ def _update_entity(user, entity, entity_id, field, value):
         raise HTTPException(403, _denied("fr", module, "modifier"))
 
     allowed = {"nom", "email", "telephone", "adresse"}
-
     if field not in allowed:
         raise HTTPException(422, "Champ de modification non autorisé.")
 
     value = (value or "").strip() or None
-
     if field == "nom" and not value:
         raise HTTPException(422, "Le nom est obligatoire.")
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
             if field == "nom":
                 cur.execute(
                     f"""
                     SELECT 1 FROM {table}
-                    WHERE LOWER(nom) = LOWER(%s)
-                      AND id <> %s
+                    WHERE LOWER(nom)=LOWER(%s) AND id<>%s
                     LIMIT 1
                     """,
                     (value, entity_id),
                 )
-
                 if cur.fetchone():
                     raise HTTPException(
-                        409,
-                        "Un autre enregistrement porte déjà ce nom.",
+                        409, "Un autre enregistrement porte déjà ce nom."
                     )
 
             cur.execute(
                 f"""
                 UPDATE {table}
-                SET {field} = %s
-                WHERE id = %s
+                SET {field}=%s
+                WHERE id=%s
                 RETURNING id, nom, email, telephone, adresse
                 """,
                 (value, entity_id),
             )
-
             row = cur.fetchone()
-
             if not row:
                 raise HTTPException(404, "Enregistrement introuvable.")
 
@@ -268,11 +233,9 @@ def _update_entity(user, entity, entity_id, field, value):
 
         conn.commit()
         return result
-
     except Exception:
         conn.rollback()
         raise
-
     finally:
         pool.putconn(conn)
 
@@ -282,13 +245,11 @@ def _search_products(user, query):
         raise HTTPException(403, _denied("fr", "stock", "consulter"))
 
     q = (query or "").strip()
-
     if not q:
         return []
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -302,15 +263,12 @@ def _search_products(user, query):
                 """,
                 (f"%{q}%", f"%{q}%"),
             )
-
             rows = cur.fetchall()
             cols = [d[0] for d in cur.description]
-
             return [
                 dict(zip(cols, [_fmt(v) for v in row]))
                 for row in rows
             ]
-
     finally:
         pool.putconn(conn)
 
@@ -331,25 +289,26 @@ def _format_products(rows, lang):
             f"Price: {r['prix_unitaire']:.2f} | Stock: {r['stock_actuel']}"
             for r in rows
         ]
-        intro = "Products found:\n"
-
     elif lang == "ar":
         lines = [
             f"- {r['nom']} | المرجع: {r['reference']} | "
-            f"السعر: {r['prix_unitaire']:.2f} | "
-            f"المخزون: {r['stock_actuel']}"
+            f"السعر: {r['prix_unitaire']:.2f} | المخزون: {r['stock_actuel']}"
             for r in rows
         ]
-        intro = "المنتجات التي تم العثور عليها:\n"
-
     else:
         lines = [
             f"- {r['nom']} | Réf: {r['reference']} | "
             f"Prix: {r['prix_unitaire']:.2f} | Stock: {r['stock_actuel']}"
             for r in rows
         ]
-        intro = "Produits trouvés :\n"
 
+    intro = (
+        "Produits trouvés:\n"
+        if lang == "fr"
+        else "Products found:\n"
+        if lang == "en"
+        else "المنتجات التي تم العثور عليها:\n"
+    )
     return intro + "\n".join(lines)
 
 
@@ -362,11 +321,9 @@ def _create_order(user, client_id, lines):
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM client WHERE id = %s", (client_id,))
-
+            cur.execute("SELECT 1 FROM client WHERE id=%s", (client_id,))
             if not cur.fetchone():
                 raise HTTPException(404, "Client introuvable.")
 
@@ -378,14 +335,11 @@ def _create_order(user, client_id, lines):
                     """
                     SELECT id, nom, prix_unitaire,
                            COALESCE(stock_actuel, 0)
-                    FROM produit
-                    WHERE id = %s
+                    FROM produit WHERE id=%s
                     """,
                     (line["produit_id"],),
                 )
-
                 row = cur.fetchone()
-
                 if not row:
                     raise HTTPException(404, "Produit introuvable.")
 
@@ -397,9 +351,7 @@ def _create_order(user, client_id, lines):
                     )
 
                 total += Decimal(str(row[2])) * line["quantite"]
-                normalized.append(
-                    (row[0], line["quantite"], row[2])
-                )
+                normalized.append((row[0], line["quantite"], row[2]))
 
             total = total.quantize(Decimal("0.01"))
 
@@ -411,14 +363,12 @@ def _create_order(user, client_id, lines):
 
             cur.execute(
                 """
-                INSERT INTO commande
-                    (client_id, statut, montant_total, numero)
+                INSERT INTO commande (client_id, statut, montant_total, numero)
                 VALUES (%s, 'confirmee', %s, %s)
                 RETURNING id
                 """,
                 (client_id, total, numero),
             )
-
             commande_id = cur.fetchone()[0]
 
             cur.executemany(
@@ -434,17 +384,14 @@ def _create_order(user, client_id, lines):
             )
 
         conn.commit()
-
         return {
             "id": commande_id,
             "numero": numero,
             "total": float(total),
         }
-
     except Exception:
         conn.rollback()
         raise
-
     finally:
         pool.putconn(conn)
 
@@ -455,32 +402,24 @@ def _create_invoice(user, commande_id):
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT id, numero
-                FROM facture
-                WHERE commande_id = %s
-                ORDER BY id
-                LIMIT 1
+                SELECT id, numero FROM facture
+                WHERE commande_id=%s ORDER BY id LIMIT 1
                 """,
                 (commande_id,),
             )
-
             existing = cur.fetchone()
-
             if existing:
                 return {"id": existing[0], "numero": existing[1]}
 
             cur.execute(
-                "SELECT montant_total, statut FROM commande WHERE id = %s",
+                "SELECT montant_total, statut FROM commande WHERE id=%s",
                 (commande_id,),
             )
-
             row = cur.fetchone()
-
             if not row:
                 raise HTTPException(404, "Commande introuvable.")
 
@@ -493,44 +432,34 @@ def _create_invoice(user, commande_id):
             cur.execute(
                 """
                 INSERT INTO facture
-                    (
-                        commande_id, numero, montant_total,
-                        statut, code_verification
-                    )
-                VALUES (
-                    %s, %s, %s, 'impayee',
-                    encode(gen_random_bytes(24), 'hex')
-                )
+                    (commande_id, numero, montant_total, statut, code_verification)
+                VALUES (%s, %s, %s, 'impayee',
+                        encode(gen_random_bytes(24), 'hex'))
                 RETURNING id
                 """,
                 (commande_id, numero, row[0]),
             )
-
             fid = cur.fetchone()[0]
 
             cur.execute(
                 """
                 INSERT INTO ligne_facture
-                    (
-                        facture_id, produit_id, designation,
-                        quantite, prix_unitaire, remise_pct
-                    )
+                    (facture_id, produit_id, designation, quantite,
+                     prix_unitaire, remise_pct)
                 SELECT %s, lc.produit_id, p.nom, lc.quantite,
                        lc.prix_unitaire, 0
                 FROM ligne_commande lc
-                JOIN produit p ON p.id = lc.produit_id
-                WHERE lc.commande_id = %s
+                JOIN produit p ON p.id=lc.produit_id
+                WHERE lc.commande_id=%s
                 """,
                 (fid, commande_id),
             )
 
         conn.commit()
         return {"id": fid, "numero": numero}
-
     except Exception:
         conn.rollback()
         raise
-
     finally:
         pool.putconn(conn)
 
@@ -544,15 +473,15 @@ def _is_yes(m):
 
 def _is_no(m):
     return m.strip().lower() in {
-        "non", "no", "n", "annuler", "annule",
-        "cancel", "لا", "إلغاء", "الغاء",
+        "non", "no", "n", "annuler", "annule", "cancel",
+        "لا", "إلغاء", "الغاء",
     }
 
 
 def _is_skip(m):
     return m.strip().lower() in {
-        "passer", "skip", "aucun", "aucune",
-        "لا", "تخطي", "تخطى",
+        "passer", "skip", "aucun", "aucune", "لا",
+        "تخطي", "تخطى",
     }
 
 
@@ -567,13 +496,13 @@ def _prompts(lang):
             "search": "What client/supplier name should I search for?",
             "field": "Which field do you want to modify: name, email, phone or address?",
             "value": "What is the new value?",
-            "editconfirm": "Please confirm this modification (yes/no)",
-            "order_client": "Quel client souhaitez-vous utiliser pour la commande ?",
-            "order_product": "Quel produit souhaitez-vous ajouter ?",
-            "order_qty": "Quelle quantité souhaitez-vous commander ?",
-            "order_more": "Voulez-vous ajouter un autre produit ? (oui/non)",
-            "order_confirm": "Voici le récapitulatif de la commande. Voulez-vous confirmer la création ? (oui/non)",
-            "invoice": "La commande a été créée. Voulez-vous préparer la facture maintenant ? (oui/non)",
+            "editconfirm": "Please confirm this modification (yes/no).",
+            "order_client": "Which customer should be used for the order?",
+            "order_product": "Which product would you like to add?",
+            "order_qty": "What quantity would you like to order?",
+            "order_more": "Would you like to add another product? (yes/no)",
+            "order_confirm": "Here is the order summary. Confirm creation? (yes/no)",
+            "invoice": "The order was created. Would you like to prepare the invoice now? (yes/no)",
         }
 
     if lang == "ar":
@@ -591,7 +520,7 @@ def _prompts(lang):
             "order_product": "ما المنتج الذي تريد إضافته؟",
             "order_qty": "ما الكمية التي تريد طلبها؟",
             "order_more": "هل تريد إضافة منتج آخر؟ (نعم/لا)",
-            "order_confirm": "هذا هو ملخص الطلب. هل تريد تأكيد إنشاءه؟ (نعم/لا)",
+            "order_confirm": "هذا هو ملخص الطلب. هل تريد تأكيد إنشائه؟ (نعم/لا)",
             "invoice": "تم إنشاء الطلب. هل تريد إعداد الفاتورة الآن؟ (نعم/لا)",
         }
 
@@ -617,10 +546,8 @@ def _prompts(lang):
 def _label(entity, lang):
     if lang == "en":
         return "customer" if entity == "client" else "supplier"
-
     if lang == "ar":
         return "العميل" if entity == "client" else "المورد"
-
     return "client" if entity == "client" else "fournisseur"
 
 
@@ -643,7 +570,6 @@ def _summary(entity, data, lang):
             f"- Phone: {v('telephone')}\n"
             f"- Address: {v('adresse')}"
         )
-
     if lang == "ar":
         return (
             f"ملخص {label}:\n"
@@ -652,7 +578,6 @@ def _summary(entity, data, lang):
             f"- الهاتف: {v('telephone')}\n"
             f"- العنوان: {v('adresse')}"
         )
-
     return (
         f"Récapitulatif du {label} :\n"
         f"- Nom : {v('nom')}\n"
@@ -686,15 +611,14 @@ def _format_search(rows, entity, lang):
 
     if lang == "en":
         return "Search results:\n" + "\n".join(lines)
-
     if lang == "ar":
         return "نتائج البحث:\n" + "\n".join(lines)
-
     return "Résultats de recherche :\n" + "\n".join(lines)
 
 
 def _normalize_nlu_text(value):
-    """Normalize accents and punctuation for multilingual intent fallback."""
+    """Normalise les accents et la ponctuation pour le fallback NLU."""
+    import re
     import unicodedata
 
     text = (
@@ -704,19 +628,18 @@ def _normalize_nlu_text(value):
         .replace("œ", "oe")
         .replace("æ", "ae")
     )
-
     text = "".join(
         ch for ch in unicodedata.normalize("NFKD", text)
         if not unicodedata.combining(ch)
     )
-
     text = re.sub(r"[^\w\s@.+/-]", " ", text, flags=re.UNICODE)
-
     return " ".join(text.split())
 
 
 def _fallback_understanding(message):
-    """Deterministic multilingual fallback used when no LLM is configured or available."""
+    """Classification multilingue déterministe si aucun LLM n'est disponible."""
+    import re
+
     m = _normalize_nlu_text(message)
     result = {
         "intent": None,
@@ -728,7 +651,6 @@ def _fallback_understanding(message):
     order_terms = (
         "commande", "commandes", "order", "orders", "طلب", "طلبات",
     )
-
     order_actions = (
         "creer", "creation", "ajouter", "ajoute", "faire", "passer",
         "preparer", "etablir", "lancer", "enregistrer", "commander",
@@ -737,29 +659,24 @@ def _fallback_understanding(message):
         "add", "new", "please create", "إنشاء", "انشاء", "اضافة",
         "أريد", "اريد", "طلب جديد", "انشاء طلب", "إنشاء طلب",
     )
-
     client_terms = (
         "client", "clients", "customer", "customers",
         "عميل", "عملاء", "زبون", "زبائن",
     )
-
     supplier_terms = (
         "fournisseur", "fournisseurs", "supplier", "suppliers",
         "مورد", "موردين",
     )
-
     create_terms = (
         "creer", "creation", "ajouter", "ajoute", "nouveau",
         "nouvelle", "add", "create", "new", "enregistrer",
         "إنشاء", "انشاء", "اضافة", "إضافة",
     )
-
     search_terms = (
         "chercher", "rechercher", "recherche", "trouver", "cherche",
         "find", "search", "look for", "consulter", "afficher",
         "montre", "liste", "بحث", "ابحث", "البحث", "عرض",
     )
-
     edit_terms = (
         "modifier", "modifie", "modification", "edit", "update",
         "change", "changer", "mettre a jour", "تعديل", "عدل", "تغيير",
@@ -776,7 +693,6 @@ def _fallback_understanding(message):
         )
     ):
         result.update(intent="create_commande", confidence=0.78)
-
     else:
         entity = (
             "client"
@@ -791,36 +707,19 @@ def _fallback_understanding(message):
                 entity == "client"
                 and re.search(r"\b(creer|ajouter|faire)\b.*\b(client|customer)\b", m)
             ):
-                result.update(
-                    intent=f"create_{entity}",
-                    confidence=0.75,
-                )
-
+                result.update(intent=f"create_{entity}", confidence=0.75)
             elif any(term in m for term in edit_terms):
-                result.update(
-                    intent=f"edit_{entity}",
-                    confidence=0.75,
-                )
-
+                result.update(intent=f"edit_{entity}", confidence=0.75)
             elif any(term in m for term in search_terms):
-                result.update(
-                    intent=f"search_{entity}",
-                    confidence=0.72,
-                )
+                result.update(intent=f"search_{entity}", confidence=0.72)
 
     quantity = re.search(
-        r"\b(\d{1,7})\b\s*(?:unites?|pieces?|pcs?)?",
-        m,
+        r"\b(\d{1,7})\b\s*(?:unites?|pieces?|pcs?)?", m
     )
-
     if quantity:
         result["entities"]["quantity"] = int(quantity.group(1))
 
-    email = re.search(
-        r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}",
-        message or "",
-    )
-
+    email = re.search(r"[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}", message or "")
     if email:
         result["entities"]["email"] = email.group(0)
 
@@ -831,15 +730,12 @@ def _fallback_understanding(message):
         message or "",
         re.IGNORECASE,
     )
-
     if client_match and result["intent"] == "create_commande":
         candidate = client_match.group(1).strip(" .,'\"»")
-
         stop_words = (
             "avec", "et", "pour", "produit", "article",
             "quantite", "quantité", "de", "du",
         )
-
         candidate = re.split(
             r"\s+(?:" + "|".join(stop_words) + r")\s+",
             candidate,
@@ -857,7 +753,6 @@ def _fallback_understanding(message):
         message or "",
         re.IGNORECASE,
     )
-
     if product_match and result["intent"] == "create_commande":
         result["entities"]["product_name"] = re.split(
             r"\s+(?:pour|avec|quantite|quantité|et)\s+",
@@ -867,12 +762,10 @@ def _fallback_understanding(message):
 
     named_match = re.search(
         r"(?:nomme|nommé|nommee|nommée|appele|appelé|appelee|appelée|"
-        r"named|name is)\s+[«\"']?"
-        r"([\wÀ-ÿ][\wÀ-ÿ .'-]{1,60})",
+        r"named|name is)\s+[«\"']?([\wÀ-ÿ][\wÀ-ÿ .'-]{1,60})",
         message or "",
         re.IGNORECASE,
     )
-
     if named_match:
         candidate = re.split(
             r"\s+(?:avec|et|email|e-mail|telephone|téléphone|adresse|phone)\s+",
@@ -882,7 +775,6 @@ def _fallback_understanding(message):
 
         if result["intent"] == "create_client":
             result["entities"]["client_name"] = candidate
-
         elif result["intent"] == "create_fournisseur":
             result["entities"]["supplier_name"] = candidate
 
@@ -890,34 +782,26 @@ def _fallback_understanding(message):
 
 
 def _understand_message(message, langue="fr"):
-    """Optional OpenAI-compatible NLU with safe deterministic fallback."""
+    """Utilise un LLM facultatif pour classifier les intentions et extraire les entités."""
     import json
+    import os
+    import re
     import httpx
 
     fallback = _fallback_understanding(message)
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
-
     if not api_key:
         return fallback
 
     allowed = {
-        "create_commande",
-        "create_client",
-        "create_fournisseur",
-        "edit_client",
-        "edit_fournisseur",
-        "search_client",
-        "search_fournisseur",
-        "analytics",
-        "general",
-        None,
+        "create_commande", "create_client", "create_fournisseur",
+        "edit_client", "edit_fournisseur", "search_client",
+        "search_fournisseur", "analytics", "general", None,
     }
 
     base_url = os.getenv(
-        "OPENAI_BASE_URL",
-        "https://api.openai.com/v1",
+        "OPENAI_BASE_URL", "https://api.openai.com/v1"
     ).rstrip("/")
-
     model = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 
     system = (
@@ -927,12 +811,13 @@ def _understand_message(message, langue="fr"):
         "intent doit être l'une de: create_commande, create_client, "
         "create_fournisseur, edit_client, edit_fournisseur, search_client, "
         "search_fournisseur, analytics, general, null. entities est un objet "
-        "pouvant contenir client_name, product_name, quantity (entier), "
-        "email, phone, address, field, value. N'invente aucune information; "
-        "utilise null ou omets une entité absente. confidence est un nombre "
-        "entre 0 et 1. Interprète les paraphrases en français, anglais et "
-        "arabe. Si la demande est ambiguë ou ne correspond pas à une action "
-        "supportée, choisis general ou null."
+        "pouvant contenir client_name, product_name, quantity (entier), email, "
+        "phone, address, field, value. N'invente aucune information. "
+        "Interprète les paraphrases en français, anglais et arabe, notamment "
+        "'créer une commande', 'faire une commande', 'passer une commande' "
+        "et 'je voudrais commander' comme create_commande. Si la demande est "
+        "ambiguë ou ne correspond pas à une action supportée, choisis general "
+        "ou null."
     )
 
     try:
@@ -959,10 +844,8 @@ def _understand_message(message, langue="fr"):
             },
             timeout=5.0,
         )
-
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
-
         parsed = json.loads(
             re.sub(
                 r"^```(?:json)?\s*|\s*```$",
@@ -973,7 +856,6 @@ def _understand_message(message, langue="fr"):
         )
 
         intent = parsed.get("intent")
-
         if intent not in allowed:
             return fallback
 
@@ -985,25 +867,21 @@ def _understand_message(message, langue="fr"):
             if isinstance(parsed.get("entities"), dict)
             else {}
         )
-
         safe_entities = {}
 
         for key in (
-            "client_name", "product_name", "email",
-            "phone", "address", "field", "value",
+            "client_name", "product_name", "email", "phone",
+            "address", "field", "value",
         ):
             value = entities.get(key)
-
             if isinstance(value, str) and value.strip():
                 safe_entities[key] = value.strip()[:200]
 
         quantity = entities.get("quantity")
-
         if isinstance(quantity, int) and 0 < quantity <= 1000000:
             safe_entities["quantity"] = quantity
 
         confidence = parsed.get("confidence", 0)
-
         try:
             confidence = max(0.0, min(1.0, float(confidence)))
         except (TypeError, ValueError):
@@ -1018,13 +896,12 @@ def _understand_message(message, langue="fr"):
             "confidence": confidence,
             "source": "llm",
         }
-
     except Exception:
         return fallback
 
 
 def _intent(m):
-    """Backward-compatible wrapper for older tests/call sites."""
+    """Wrapper rétrocompatible utilisé par les anciens tests."""
     return _fallback_understanding(m).get("intent")
 
 
@@ -1040,23 +917,27 @@ def _answer_data(message, langue, user):
 
         pool = _pool(user)
         conn = pool.getconn()
-
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM client")
                 count = cur.fetchone()[0]
-
                 cur.execute("SELECT nom FROM client ORDER BY nom LIMIT 10")
                 names = [r[0] for r in cur.fetchall()]
 
             if langue == "en":
-                return f"There are {count} clients. First names: {', '.join(names) if names else 'none'}."
-
+                return (
+                    f"There are {count} clients. First names: "
+                    f"{', '.join(names) if names else 'none'}."
+                )
             if langue == "ar":
-                return f"يوجد {count} عميلاً. من الأسماء الأولى: {', '.join(names) if names else 'لا يوجد'}."
-
-            return f"Il y a {count} client(s). Premiers noms : {', '.join(names) if names else 'aucun'}."
-
+                return (
+                    f"يوجد {count} عميلاً. من الأسماء الأولى: "
+                    f"{', '.join(names) if names else 'لا يوجد'}."
+                )
+            return (
+                f"Il y a {count} client(s). Premiers noms : "
+                f"{', '.join(names) if names else 'aucun'}."
+            )
         finally:
             pool.putconn(conn)
 
@@ -1069,56 +950,51 @@ def _answer_data(message, langue, user):
 
         pool = _pool(user)
         conn = pool.getconn()
-
         try:
             with conn.cursor() as cur:
                 cur.execute("SELECT COUNT(*) FROM fournisseur")
                 count = cur.fetchone()[0]
-
-                cur.execute(
-                    "SELECT nom FROM fournisseur ORDER BY nom LIMIT 10"
-                )
+                cur.execute("SELECT nom FROM fournisseur ORDER BY nom LIMIT 10")
                 names = [r[0] for r in cur.fetchall()]
 
             if langue == "en":
-                return f"There are {count} suppliers. First names: {', '.join(names) if names else 'none'}."
-
+                return (
+                    f"There are {count} suppliers. First names: "
+                    f"{', '.join(names) if names else 'none'}."
+                )
             if langue == "ar":
-                return f"يوجد {count} مورّد(ين). من الأسماء الأولى: {', '.join(names) if names else 'لا يوجد'}."
-
-            return f"Il y a {count} fournisseur(s). Premiers noms : {', '.join(names) if names else 'aucun'}."
-
+                return (
+                    f"يوجد {count} مورّد(ين). من الأسماء الأولى: "
+                    f"{', '.join(names) if names else 'لا يوجد'}."
+                )
+            return (
+                f"Il y a {count} fournisseur(s). Premiers noms : "
+                f"{', '.join(names) if names else 'aucun'}."
+            )
         finally:
             pool.putconn(conn)
 
     if any(k in m for k in [
-        "stock", "inventaire", "inventory", "produit",
-        "products", "product", "مخزون", "مخزن", "منتج",
+        "stock", "inventaire", "inventory", "produit", "products",
+        "product", "مخزون", "مخزن", "منتج",
     ]):
         if not _has_permission(user, "stock"):
             return _denied(langue, "stock")
 
         pool = _pool(user)
         conn = pool.getconn()
-
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT COUNT(*),
-                           COALESCE(
-                               SUM(
-                                   CASE
-                                       WHEN COALESCE(stock_actuel, 0) <= 0
-                                       THEN 1 ELSE 0
-                                   END
-                               ),
-                               0
-                           )
+                           COALESCE(SUM(
+                               CASE WHEN COALESCE(stock_actuel, 0) <= 0
+                               THEN 1 ELSE 0 END
+                           ), 0)
                     FROM produit
                     """
                 )
-
                 total, rupture = cur.fetchone()
 
                 cur.execute(
@@ -1130,7 +1006,6 @@ def _answer_data(message, langue, user):
                     LIMIT 10
                     """
                 )
-
                 low = cur.fetchall()
 
             lowtxt = (
@@ -1144,19 +1019,16 @@ def _answer_data(message, langue, user):
                     f"Stock contains {total} products. {rupture} are at "
                     f"zero or below. Low-stock products (<=5): {lowtxt}."
                 )
-
             if langue == "ar":
                 return (
                     f"المخزون يحتوي على {total} منتجاً. عدد المنتجات التي "
-                    f"مخزونها صفر أو أقل هو {rupture}. "
-                    f"المنتجات ذات المخزون المنخفض (<=5): {lowtxt}."
+                    f"مخزونها صفر أو أقل هو {rupture}. المنتجات ذات المخزون "
+                    f"المنخفض (<=5): {lowtxt}."
                 )
-
             return (
                 f"Le stock contient {total} produit(s). {rupture} sont à "
                 f"zéro ou en dessous. Produits à faible stock (<=5) : {lowtxt}."
             )
-
         finally:
             pool.putconn(conn)
 
@@ -1169,101 +1041,73 @@ def _answer_data(message, langue, user):
 
         pool = _pool(user)
         conn = pool.getconn()
-
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT COUNT(*),
-                           COALESCE(
-                               SUM(CASE WHEN statut = 'impayee' THEN 1 ELSE 0 END),
-                               0
-                           ),
-                           COALESCE(
-                               SUM(CASE WHEN statut = 'payee' THEN 1 ELSE 0 END),
-                               0
-                           ),
-                           COALESCE(
-                               SUM(
-                                   CASE WHEN statut = 'impayee'
-                                   THEN montant_total ELSE 0 END
-                               ),
-                               0
-                           )
+                           COALESCE(SUM(CASE WHEN statut='impayee' THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN statut='payee' THEN 1 ELSE 0 END), 0),
+                           COALESCE(SUM(CASE WHEN statut='impayee' THEN montant_total ELSE 0 END), 0)
                     FROM facture
                     """
                 )
-
                 total, unpaid, paid, amount = cur.fetchone()
 
             if langue == "en":
                 return (
-                    f"There are {total} invoices: {paid} paid and "
-                    f"{unpaid} unpaid. Unpaid amount: {float(amount):.2f}."
+                    f"There are {total} invoices: {paid} paid and {unpaid} "
+                    f"unpaid. Unpaid amount: {float(amount):.2f}."
                 )
-
             if langue == "ar":
                 return (
                     f"يوجد {total} فاتورة: {paid} مؤداة و{unpaid} غير مؤداة. "
                     f"مبلغ غير المؤداة: {float(amount):.2f}."
                 )
-
             return (
                 f"Il y a {total} facture(s) : {paid} payée(s) et "
                 f"{unpaid} impayée(s). Montant impayé : {float(amount):.2f}."
             )
-
         finally:
             pool.putconn(conn)
 
     if any(k in m for k in [
-        "comptabil", "accounting", "balance", "solde",
-        "achat", "achats", "account", "محاسب", "مشتريات", "رصيد",
+        "comptabil", "accounting", "balance", "solde", "achat",
+        "achats", "account", "محاسب", "مشتريات", "رصيد",
     ]):
         if not _has_permission(user, "comptabilite"):
             return _denied(langue, "comptabilite")
 
         pool = _pool(user)
         conn = pool.getconn()
-
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT
-                        COALESCE(
-                            SUM(CASE WHEN statut = 'payee'
-                                THEN montant_total ELSE 0 END),
-                            0
-                        ),
-                        COALESCE(
-                            SUM(CASE WHEN statut = 'impayee'
-                                THEN montant_total ELSE 0 END),
-                            0
-                        )
+                        COALESCE(SUM(CASE WHEN statut='payee'
+                                          THEN montant_total ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN statut='impayee'
+                                          THEN montant_total ELSE 0 END), 0)
                     FROM facture
                     """
                 )
-
                 paid, unpaid = cur.fetchone()
 
                 cur.execute(
                     """
                     SELECT COALESCE(SUM(montant_total), 0)
-                    FROM achat
-                    WHERE statut <> 'annulee'
+                    FROM achat WHERE statut <> 'annulee'
                     """
                 )
-
                 purchases = cur.fetchone()[0]
 
             return (
                 f"Synthèse comptable : factures payées {float(paid):.2f}, "
                 f"factures impayées {float(unpaid):.2f}, "
                 f"achats {float(purchases):.2f}, "
-                f"solde commercial {float(paid - purchases):.2f}."
+                f"solde commercial {float(paid-purchases):.2f}."
             )
-
         finally:
             pool.putconn(conn)
 
@@ -1271,7 +1115,7 @@ def _answer_data(message, langue, user):
 
 
 def _period_clause(message):
-    """Return a SQL date condition for common temporal requests."""
+    """Retourne une condition SQL pour les périodes courantes."""
     m = message.lower()
 
     if (
@@ -1296,13 +1140,12 @@ def _period_clause(message):
 
 
 def _normalize_analytics_text(message):
-    """Normalize common French/English input variations for analytics."""
+    """Normalise les variations de texte pour les requêtes analytiques."""
     import unicodedata
 
     text = (message or "").lower().strip().replace("’", "'")
     text = text.replace("-", " ")
     text = " ".join(text.split())
-
     return "".join(
         c for c in unicodedata.normalize("NFD", text)
         if unicodedata.category(c) != "Mn"
@@ -1310,7 +1153,7 @@ def _normalize_analytics_text(message):
 
 
 def _analytics_answer(message, langue, user):
-    """Answer read-only commercial analytics questions from the tenant DB."""
+    """Répond aux questions analytiques commerciales en lecture seule."""
     m = _normalize_analytics_text(message)
 
     sales_words = [
@@ -1318,35 +1161,29 @@ def _analytics_answer(message, langue, user):
         "sales", "revenue", "orders", "mبيعات", "المبيعات",
         "رقم المعاملات", "طلبات",
     ]
-
     top_product_words = [
         "produit le plus vendu", "produits les plus vendus",
         "best seller", "best-seller", "top produit", "top products",
         "most sold", "المنتجات الأكثر مبيعا", "أكثر المنتجات مبيعا",
     ]
-
     top_client_words = [
         "client le plus actif", "clients les plus actifs",
-        "meilleur client", "meilleurs clients", "top client",
-        "top clients", "best customer", "best customers",
-        "most valuable customer", "العملاء الأكثر نشاطا", "أفضل العملاء",
+        "meilleur client", "meilleurs clients", "top client", "top clients",
+        "best customer", "best customers", "most valuable customer",
+        "العملاء الأكثر نشاطا", "أفضل العملاء",
     ]
-
     unpaid_words = [
-        "factures impayées", "facture impayée", "impayé",
-        "impayées", "unpaid invoice", "unpaid invoices",
-        "factures non payées", "الفواتير غير المؤداة",
-        "فاتورة غير مؤداة",
+        "factures impayées", "facture impayée", "impayé", "impayées",
+        "unpaid invoice", "unpaid invoices", "factures non payées",
+        "الفواتير غير المؤداة", "فاتورة غير مؤداة",
     ]
-
     summary_words = [
         "synthese des ventes", "synthese de ventes",
         "synthese des vente", "synthese de vente",
-        "resume des ventes", "resume des vente",
-        "resume commercial", "synthese commerciale",
-        "sales summary", "commercial summary",
-        "sales overview", "overview of sales",
-        "ملخص المبيعات", "ملخص المبيعات التجارية", "ملخص تجاري",
+        "resume des ventes", "resume des vente", "resume commercial",
+        "synthese commerciale", "sales summary", "commercial summary",
+        "sales overview", "overview of sales", "ملخص المبيعات",
+        "ملخص المبيعات التجارية", "ملخص تجاري",
     ]
 
     wants_summary = any(w in m for w in summary_words)
@@ -1356,17 +1193,13 @@ def _analytics_answer(message, langue, user):
     wants_sales = any(w in m for w in sales_words)
 
     if not (
-        wants_summary
-        or wants_top_product
-        or wants_top_client
-        or wants_unpaid
-        or wants_sales
+        wants_summary or wants_top_product or wants_top_client
+        or wants_unpaid or wants_sales
     ):
         return None
 
     pool = _pool(user)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
             if wants_unpaid and not wants_summary:
@@ -1376,28 +1209,24 @@ def _analytics_answer(message, langue, user):
                 cur.execute(
                     """
                     SELECT COUNT(*), COALESCE(SUM(montant_total), 0)
-                    FROM facture
-                    WHERE statut = 'impayee'
+                    FROM facture WHERE statut='impayee'
                     """
                 )
-
                 count, amount = cur.fetchone()
 
                 if langue == "en":
                     return (
-                        f"There are {count} unpaid invoice(s), "
-                        f"for a total of {float(amount):.2f}."
+                        f"There are {count} unpaid invoice(s), for a total "
+                        f"of {float(amount):.2f}."
                     )
-
                 if langue == "ar":
                     return (
-                        f"يوجد {count} فاتورة غير مؤداة، "
-                        f"بمبلغ إجمالي قدره {float(amount):.2f}."
+                        f"يوجد {count} فاتورة غير مؤداة، بمبلغ إجمالي "
+                        f"قدره {float(amount):.2f}."
                     )
-
                 return (
-                    f"Il y a {count} facture(s) impayée(s), "
-                    f"pour un montant total de {float(amount):.2f}."
+                    f"Il y a {count} facture(s) impayée(s), pour un montant "
+                    f"total de {float(amount):.2f}."
                 )
 
             if wants_top_product:
@@ -1405,25 +1234,20 @@ def _analytics_answer(message, langue, user):
                     return _denied(langue, "ventes", "consulter")
 
                 clause = _period_clause(m)
-
                 cur.execute(
                     f"""
                     SELECT p.nom,
                            COALESCE(SUM(lc.quantite), 0) AS quantite,
-                           COALESCE(
-                               SUM(lc.quantite * lc.prix_unitaire), 0
-                           ) AS ca
+                           COALESCE(SUM(lc.quantite * lc.prix_unitaire), 0) AS ca
                     FROM ligne_commande lc
-                    JOIN commande c ON c.id = lc.commande_id
-                    JOIN produit p ON p.id = lc.produit_id
-                    WHERE c.statut <> 'annulee'
-                      AND {clause}
+                    JOIN commande c ON c.id=lc.commande_id
+                    JOIN produit p ON p.id=lc.produit_id
+                    WHERE c.statut <> 'annulee' AND {clause}
                     GROUP BY p.id, p.nom
                     ORDER BY quantite DESC, ca DESC
                     LIMIT 5
                     """
                 )
-
                 rows = cur.fetchall()
 
                 if not rows:
@@ -1440,13 +1264,11 @@ def _analytics_answer(message, langue, user):
                         f"- {n}: {q} unit(s), {float(ca):.2f}"
                         for n, q, ca in rows
                     )
-
                 if langue == "ar":
                     return "أكثر المنتجات مبيعاً حسب الكمية:\n" + "\n".join(
                         f"- {n}: {q} وحدة، {float(ca):.2f}"
                         for n, q, ca in rows
                     )
-
                 return "Produits les plus vendus par quantité :\n" + "\n".join(
                     f"- {n} : {q} unité(s), {float(ca):.2f}"
                     for n, q, ca in rows
@@ -1457,22 +1279,18 @@ def _analytics_answer(message, langue, user):
                     return _denied(langue, "ventes", "consulter")
 
                 clause = _period_clause(m)
-
                 cur.execute(
                     f"""
-                    SELECT cl.nom,
-                           COUNT(c.id) AS nb_commandes,
+                    SELECT cl.nom, COUNT(c.id) AS nb_commandes,
                            COALESCE(SUM(c.montant_total), 0) AS ca
                     FROM commande c
-                    JOIN client cl ON cl.id = c.client_id
-                    WHERE c.statut <> 'annulee'
-                      AND {clause}
+                    JOIN client cl ON cl.id=c.client_id
+                    WHERE c.statut <> 'annulee' AND {clause}
                     GROUP BY cl.id, cl.nom
                     ORDER BY ca DESC
                     LIMIT 5
                     """
                 )
-
                 rows = cur.fetchall()
 
                 if not rows:
@@ -1489,13 +1307,11 @@ def _analytics_answer(message, langue, user):
                         f"- {n}: {nb} order(s), {float(ca):.2f}"
                         for n, nb, ca in rows
                     )
-
                 if langue == "ar":
                     return "أفضل العملاء حسب رقم المعاملات:\n" + "\n".join(
                         f"- {n}: {nb} طلب، {float(ca):.2f}"
                         for n, nb, ca in rows
                     )
-
                 return "Top clients par chiffre d'affaires :\n" + "\n".join(
                     f"- {n} : {nb} commande(s), {float(ca):.2f}"
                     for n, nb, ca in rows
@@ -1506,27 +1322,22 @@ def _analytics_answer(message, langue, user):
                     return _denied(langue, "ventes", "consulter")
 
                 clause = _period_clause(m)
-
                 cur.execute(
                     f"""
                     SELECT COUNT(*), COALESCE(SUM(montant_total), 0)
                     FROM commande
-                    WHERE statut <> 'annulee'
-                      AND {clause}
+                    WHERE statut <> 'annulee' AND {clause}
                     """
                 )
-
                 nb_commandes, ca = cur.fetchone()
 
                 cur.execute(
                     f"""
                     SELECT COUNT(*), COALESCE(SUM(montant_total), 0)
                     FROM commande
-                    WHERE statut = 'confirmee'
-                      AND {clause}
+                    WHERE statut='confirmee' AND {clause}
                     """
                 )
-
                 nb_conf, ca_conf = cur.fetchone()
 
                 ca = float(ca or 0)
@@ -1540,7 +1351,6 @@ def _analytics_answer(message, langue, user):
                         f"- Confirmed orders: {nb_conf}\n"
                         f"- Confirmed-order revenue: {ca_conf:.2f}"
                     )
-
                 if langue == "ar":
                     return (
                         "ملخص المبيعات\n"
@@ -1549,7 +1359,6 @@ def _analytics_answer(message, langue, user):
                         f"- عدد الطلبات المؤكدة: {nb_conf}\n"
                         f"- مبلغ الطلبات المؤكدة: {ca_conf:.2f}"
                     )
-
                 return (
                     "Synthèse des ventes\n"
                     f"- Nombre de commandes : {nb_commandes}\n"
@@ -1557,9 +1366,67 @@ def _analytics_answer(message, langue, user):
                     f"- Nombre de commandes confirmées : {nb_conf}\n"
                     f"- Montant des commandes confirmées : {ca_conf:.2f}"
                 )
-
     finally:
         pool.putconn(conn)
+
+
+def _is_documentary_question(message):
+    """Détecte les questions qui nécessitent une information documentaire interne."""
+    import unicodedata
+
+    text = (message or "").lower().replace("’", "'")
+    text = "".join(
+        char for char in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(char)
+    )
+    text = " ".join(text.split())
+
+    document_terms = (
+        # Français
+        "siege social", "adresse du siege", "adresse de l'entreprise",
+        "adresse de la societe", "coordonnees de l'entreprise",
+        "histoire de l'entreprise", "politique de l'entreprise",
+        "procedure interne", "procedures internes",
+        "reglement interieur", "conditions de travail",
+        "conges", "horaires de travail", "document interne",
+        "selon le document", "d'apres le document",
+        "dans les documents", "dans la documentation",
+        "que dit le document", "quelle est la politique",
+        # English
+        "headquarters", "company address", "company policy",
+        "internal procedure", "internal procedures",
+        "according to the document", "in the company documents",
+        "working hours", "leave policy",
+        # العربية
+        "المقر الرئيسي", "عنوان الشركة", "عنوان المؤسسة",
+        "سياسة الشركة", "الإجراءات الداخلية", "الوثائق الداخلية",
+        "حسب الوثيقة", "حسب المستند", "ساعات العمل",
+    )
+
+    return any(term in text for term in document_terms)
+
+
+def _document_not_found(langue):
+    """Réponse explicite lorsque les documents ne permettent pas de répondre."""
+    if langue == "en":
+        return (
+            "I couldn't find this information in the available company documents. "
+            "I don't want to guess. Please upload the relevant document or "
+            "provide a source containing this information."
+        )
+
+    if langue == "ar":
+        return (
+            "لم أجد هذه المعلومة في وثائق الشركة المتاحة، ولا أريد تخمين الإجابة. "
+            "يرجى رفع الوثيقة المناسبة أو توفير مصدر يحتوي على هذه المعلومة."
+        )
+
+    return (
+        "Je n’ai pas trouvé cette information dans les documents disponibles "
+        "de l’entreprise. Je préfère ne pas inventer de réponse. "
+        "Veuillez importer le document concerné ou fournir une source "
+        "contenant cette information."
+    )
 
 
 def _guide(lang, module):
@@ -1571,115 +1438,186 @@ def _guide(lang, module):
             "records, search clients or suppliers, and guide you through "
             "modifications, subject to your permissions."
         )
-
     if lang == "ar":
         return (
             f"أنت الآن في وحدة {nom}. يمكنني الاطلاع على بيانات ERP، "
             "إنشاء السجلات، البحث عن العملاء أو الموردين وإرشادك في "
             "التعديلات، حسب صلاحياتك."
         )
-
     return (
         f"Vous êtes actuellement dans {nom}. Je peux consulter les données "
         "ERP, créer des enregistrements, rechercher des clients ou "
-        "fournisseurs et vous guider dans les modifications, "
-        "selon vos permissions."
+        "fournisseurs et vous guider dans les modifications, selon vos permissions."
     )
 
 
 def _new_client_question(lang, nom):
     if lang == "en":
         return f'The customer "{nom}" does not exist. Do you want to create it? (yes/no)'
-
     if lang == "ar":
-        return f"العميل «{nom}» غير موجود. هل تريد إنشاءه؟ (نعم/لا)"
-
+        return (
+            f"العميل «{nom}» غير موجود. هل تريد إنشاءه؟ (نعم/لا)"
+        )
     return f"Le client « {nom} » n'existe pas. Voulez-vous le créer ? (oui/non)"
 
 
 def _new_client_created(lang, nom):
     if lang == "en":
         return f'Customer "{nom}" created and selected.'
-
     if lang == "ar":
         return f"تم إنشاء العميل «{nom}» واختياره."
-
     return f"Le client « {nom} » a été créé et sélectionné."
 
 
 def _rechercher_chunks_rag(utilisateur, question, limite=5):
-    """Recherche plein texte locale, isolée par base entreprise et filtrée RBAC."""
+    """Recherche RAG locale, isolée par base entreprise et filtrée par permissions."""
     if utilisateur.get("type") != "interne" or not utilisateur.get("nomBase"):
         return []
 
-    q = (question or "").strip()
-
-    if len(q) < 3:
+    question = (question or "").strip()
+    if len(question) < 3:
         return []
+
+    from app.services.rag_embeddings import (
+        embed_texts,
+        cosine_similarity,
+        MODEL_NAME,
+    )
 
     pool = _pool(utilisateur)
     conn = pool.getconn()
-
     try:
         with conn.cursor() as cur:
+            # Migration idempotente pour les bases déjà provisionnées.
+            cur.execute(
+                "ALTER TABLE assistant_document_chunk "
+                "ADD COLUMN IF NOT EXISTS embedding JSONB"
+            )
+            cur.execute(
+                "ALTER TABLE assistant_document_chunk "
+                "ADD COLUMN IF NOT EXISTS embedding_model TEXT"
+            )
             cur.execute(
                 """
-                SELECT id, titre, source, module, contenu,
-                       ts_rank(
-                           to_tsvector('simple', titre || ' ' || contenu),
-                           plainto_tsquery('simple', %s)
-                       ) AS score
+                SELECT id, titre, source, module, contenu, document_id,
+                       embedding, embedding_model
                 FROM assistant_document_chunk
                 WHERE actif = TRUE
-                  AND (
-                    to_tsvector('simple', titre || ' ' || contenu)
-                        @@ plainto_tsquery('simple', %s)
-                    OR titre ILIKE %s
-                    OR contenu ILIKE %s
-                  )
-                ORDER BY score DESC, id DESC
-                LIMIT 30
-                """,
-                (q, q, f"%{q}%", f"%{q}%"),
+                ORDER BY id DESC
+                LIMIT 10000
+                """
             )
-
             rows = cur.fetchall()
 
-        result = []
+            a_indexer = [
+                row for row in rows
+                if not row[6] or row[7] != MODEL_NAME
+            ]
 
-        for row in rows:
-            chunk_id, titre, source, module, contenu, score = row
-            module = module or "documents"
+            if a_indexer:
+                a_indexer = a_indexer[:2000]
+                vecteurs = embed_texts([row[4] for row in a_indexer])
 
-            if module not in MODULES and module != "documents":
-                continue
+                for row, vecteur in zip(a_indexer, vecteurs):
+                    import json
+                    cur.execute(
+                        """
+                        UPDATE assistant_document_chunk
+                        SET embedding = %s::jsonb, embedding_model = %s
+                        WHERE id = %s
+                        """,
+                        (json.dumps(vecteur), MODEL_NAME, row[0]),
+                    )
 
-            if not _has_permission(utilisateur, module, "consulter"):
-                continue
+                conn.commit()
 
-            excerpt = (contenu or "").strip()
-
-            if len(excerpt) > 900:
-                excerpt = excerpt[:900].rsplit(" ", 1)[0] + "…"
-
-            result.append(
-                {
-                    "id": chunk_id,
-                    "title": titre or "Document sans titre",
-                    "source": source or "Document interne",
-                    "module": module,
-                    "excerpt": excerpt,
-                    "score": float(score or 0),
+                vecteurs_par_id = {
+                    row[0]: vecteur
+                    for row, vecteur in zip(a_indexer, vecteurs)
                 }
-            )
+                rows = [
+                    tuple(list(row[:6]) + [
+                        vecteurs_par_id[row[0]], MODEL_NAME
+                    ])
+                    if row[0] in vecteurs_par_id
+                    else row
+                    for row in rows
+                ]
 
-            if len(result) >= limite:
-                break
-
-        return result
-
+            conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         pool.putconn(conn)
+
+    query_vector = embed_texts([question], query=True)[0]
+    autorise = {}
+    scored = []
+
+    for (
+        chunk_id, titre, source, module, contenu,
+        document_id, embedding, embedding_model,
+    ) in rows:
+        if not embedding or embedding_model != MODEL_NAME:
+            continue
+
+        if isinstance(embedding, str):
+            try:
+                import json
+                embedding = json.loads(embedding)
+            except ValueError:
+                continue
+
+        score = cosine_similarity(query_vector, embedding)
+        if score >= 0.35:
+            scored.append(
+                (
+                    score, chunk_id, titre, source,
+                    module, contenu, document_id,
+                )
+            )
+
+    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    result = []
+
+    for score, chunk_id, titre, source, module, contenu, document_id in scored:
+        module = module or "documents"
+
+        if module not in MODULES and module != "documents":
+            continue
+
+        # Les documents sans module métier dédié sont consultables par un
+        # collaborateur interne autorisé à utiliser l'assistant documentaire.
+        if module not in autorise:
+            if module == "documents":
+                autorise[module] = utilisateur.get("type") == "interne"
+            else:
+                autorise[module] = _has_permission(
+                    utilisateur, module, "consulter"
+                )
+
+        if not autorise[module]:
+            continue
+
+        excerpt = (contenu or "").strip()
+        if len(excerpt) > 900:
+            excerpt = excerpt[:900].rsplit(" ", 1)[0] + "…"
+
+        result.append({
+            "id": chunk_id,
+            "documentId": document_id,
+            "title": titre or "Document sans titre",
+            "source": source or "Document interne",
+            "module": module,
+            "excerpt": excerpt,
+            "score": round(float(score), 4),
+        })
+
+        if len(result) >= limite:
+            break
+
+    return result
 
 
 def _reponse_rag(sources, langue):
@@ -1702,316 +1640,12 @@ def _reponse_rag(sources, langue):
     )
 
 
-# ============================================================
-# NOUVELLE FONCTIONNALITÉ : IMPORT ET INDEXATION DES DOCUMENTS RAG
-# ============================================================
-
-MAX_DOCUMENT_SIZE = 10 * 1024 * 1024
-RAG_BUCKET = "rag-documents"
-ALLOWED_EXTENSIONS = {".pdf", ".docx"}
-
-
-def _rag_minio_client():
-    endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
-    access_key = os.getenv("MINIO_ROOT_USER")
-    secret_key = os.getenv("MINIO_ROOT_PASSWORD")
-
-    if not access_key or not secret_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Configuration MinIO manquante.",
-        )
-
-    return Minio(
-        endpoint,
-        access_key=access_key,
-        secret_key=secret_key,
-        secure=False,
-    )
-
-
-def _extraire_texte_document(content: bytes, extension: str) -> str:
-    try:
-        if extension == ".pdf":
-            reader = PdfReader(io.BytesIO(content))
-
-            if reader.is_encrypted:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Les PDF protégés par mot de passe ne sont pas acceptés.",
-                )
-
-            text = "\n".join(
-                page.extract_text() or ""
-                for page in reader.pages
-            )
-
-        elif extension == ".docx":
-            document = Document(io.BytesIO(content))
-
-            paragraphs = [
-                p.text
-                for p in document.paragraphs
-                if p.text.strip()
-            ]
-
-            for table in document.tables:
-                for row in table.rows:
-                    paragraphs.append(
-                        " | ".join(cell.text for cell in row.cells)
-                    )
-
-            text = "\n".join(paragraphs)
-
-        else:
-            raise HTTPException(
-                status_code=415,
-                detail="Formats acceptés : PDF et DOCX.",
-            )
-
-    except HTTPException:
-        raise
-
-    except Exception as exc:
-        raise HTTPException(
-            status_code=422,
-            detail="Impossible de lire ce document. Vérifiez son format.",
-        ) from exc
-
-    text = text.strip()
-
-    if not text:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Aucun texte extractible. "
-                "Les PDF scannés nécessitent une étape OCR."
-            ),
-        )
-
-    return text
-
-
-def _decouper_texte(
-    text: str,
-    taille: int = 1200,
-    chevauchement: int = 150,
-):
-    """Découpe le texte en morceaux avec chevauchement."""
-    chunks = []
-    start = 0
-
-    while start < len(text):
-        end = min(start + taille, len(text))
-
-        if end < len(text):
-            boundary = text.rfind(" ", start + taille // 2, end)
-
-            if boundary > start:
-                end = boundary
-
-        morceau = text[start:end].strip()
-
-        if morceau:
-            chunks.append(morceau)
-
-        if end >= len(text):
-            break
-
-        start = end - chevauchement
-
-    return chunks
-
-
-@router.post("/documents/upload", status_code=201)
-def upload_document_rag(
-    fichier: UploadFile = File(...),
-    titre: str = Form(default=""),
-    utilisateur=Depends(utilisateur_connecte),
-):
-    # Réservé aux collaborateurs internes de l'entreprise.
-    if (
-        utilisateur.get("type") != "interne"
-        or not utilisateur.get("nomBase")
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="Accès réservé aux collaborateurs de l'entreprise.",
-        )
-
-    if not _has_permission(utilisateur, "documents", "creer"):
-        raise HTTPException(
-            status_code=403,
-            detail=_denied("fr", "documents", "creer"),
-        )
-
-    filename = Path(fichier.filename or "").name
-    extension = Path(filename).suffix.lower()
-
-    if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=415,
-            detail="Formats acceptés : PDF et DOCX.",
-        )
-
-    content = fichier.file.read(MAX_DOCUMENT_SIZE + 1)
-
-    if not content:
-        raise HTTPException(
-            status_code=400,
-            detail="Le fichier est vide.",
-        )
-
-    if len(content) > MAX_DOCUMENT_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail="La taille maximale autorisée est de 10 Mo.",
-        )
-
-    # Vérification élémentaire de la signature du fichier.
-    if extension == ".pdf" and not content.startswith(b"%PDF-"):
-        raise HTTPException(
-            status_code=422,
-            detail="Fichier PDF invalide.",
-        )
-
-    if extension == ".docx" and not content.startswith(b"PK"):
-        raise HTTPException(
-            status_code=422,
-            detail="Fichier DOCX invalide.",
-        )
-
-    texte = _extraire_texte_document(content, extension)
-    chunks = _decouper_texte(texte)
-
-    if not chunks:
-        raise HTTPException(
-            status_code=422,
-            detail="Aucun texte exploitable.",
-        )
-
-    document_id = str(uuid.uuid4())
-    nom_base = utilisateur["nomBase"]
-
-    # Séparer les fichiers des différentes entreprises.
-    tenant_id = hashlib.sha256(
-        nom_base.encode("utf-8")
-    ).hexdigest()[:24]
-
-    object_key = (
-        f"{tenant_id}/{document_id}/{uuid.uuid4().hex}{extension}"
-    )
-
-    document_title = (
-        titre.strip() or Path(filename).stem
-    )[:200]
-
-    client = _rag_minio_client()
-    object_saved = False
-
-    pool = _pool(utilisateur)
-    conn = pool.getconn()
-
-    try:
-        # Créer le bucket s'il n'existe pas.
-        if not client.bucket_exists(RAG_BUCKET):
-            client.make_bucket(RAG_BUCKET)
-
-        # Sauvegarder le fichier original dans MinIO.
-        content_type = (
-            "application/pdf"
-            if extension == ".pdf"
-            else (
-                "application/vnd.openxmlformats-officedocument."
-                "wordprocessingml.document"
-            )
-        )
-
-        client.put_object(
-            RAG_BUCKET,
-            object_key,
-            io.BytesIO(content),
-            length=len(content),
-            content_type=content_type,
-        )
-
-        object_saved = True
-
-        # Indexer les morceaux de texte dans PostgreSQL.
-        with conn.cursor() as cur:
-            for morceau in chunks:
-                cur.execute(
-                    """
-                    INSERT INTO assistant_document_chunk
-                        (
-                            document_id,
-                            titre,
-                            source,
-                            module,
-                            contenu,
-                            langue,
-                            actif
-                        )
-                    VALUES (%s, %s, %s, 'documents', %s, 'fr', TRUE)
-                    """,
-                    (
-                        document_id,
-                        document_title,
-                        filename,
-                        morceau,
-                    ),
-                )
-
-        conn.commit()
-
-        return {
-            "message": "Document importé et indexé avec succès.",
-            "document_id": document_id,
-            "titre": document_title,
-            "source": filename,
-            "chunks": len(chunks),
-            "taille_octets": len(content),
-        }
-
-    except Exception as exc:
-        conn.rollback()
-
-        # Éviter de conserver le fichier si l'indexation échoue.
-        if object_saved:
-            try:
-                client.remove_object(RAG_BUCKET, object_key)
-            except Exception:
-                pass
-
-        if isinstance(exc, HTTPException):
-            raise
-
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "Échec de l'enregistrement du document. "
-                "Vérifiez les logs du backend."
-            ),
-        ) from exc
-
-    finally:
-        pool.putconn(conn)
-        fichier.file.close()
-
-
-# ============================================================
-# CHAT DE L'ASSISTANT
-# ============================================================
-
 @router.post("/chat")
 def chat(
     payload: AssistantMessage,
     utilisateur=Depends(utilisateur_connecte),
 ):
-    if (
-        not utilisateur.get("nomBase")
-        or utilisateur.get("type") == "externe"
-    ):
+    if not utilisateur.get("nomBase") or utilisateur.get("type") == "externe":
         raise HTTPException(
             403,
             "Assistant réservé aux collaborateurs de l'entreprise.",
@@ -2021,13 +1655,12 @@ def chat(
     state = payload.state.model_copy(deep=True)
     prompts = _prompts(payload.langue)
 
-    # Ne pas reclassifier les réponses tant qu'un workflow est actif.
+    # Ne pas reclassifier une réponse de suivi si un workflow est actif.
     understanding = (
         _understand_message(payload.message, payload.langue)
         if not state.operation
         else {"intent": None, "entities": {}}
     )
-
     intent = understanding.get("intent")
     entities = understanding.get("entities") or {}
 
@@ -2050,22 +1683,15 @@ def chat(
                 step="client",
                 data={},
             )
-
             client_name = entities.get("client_name")
 
             if client_name:
-                rows = _find_entity(
-                    utilisateur,
-                    "client",
-                    client_name,
-                )
-
+                rows = _find_entity(utilisateur, "client", client_name)
                 exact = [
                     row for row in rows
                     if str(row.get("nom", "")).strip().casefold()
                     == client_name.strip().casefold()
                 ]
-
                 selected = (
                     exact[0]
                     if len(exact) == 1
@@ -2080,7 +1706,6 @@ def chat(
                         "client_nom": selected["nom"],
                         "lines": [],
                     }
-
                     state.step = "product"
 
                     if payload.langue == "fr":
@@ -2099,109 +1724,101 @@ def chat(
                             f"{prompts['order_product']}"
                         )
 
-                    return {
-                        "reply": reply,
-                        "state": state.model_dump(),
-                    }
+                    return {"reply": reply, "state": state.model_dump()}
 
             return {
                 "reply": prompts["order_client"],
                 "state": state.model_dump(),
             }
 
-        entity = intent.split("_", 1)[1]
-
+        # Compatibilité des noms de workflow fournisseur.
+        parts = intent.split("_", 1)
+        entity = parts[1] if len(parts) > 1 else ""
         if entity == "supplier":
             entity = "fournisseur"
 
-        module, _ = _entity_meta(entity)
+        if entity not in {"client", "fournisseur"}:
+            entity = None
 
-        action = (
-            "creer"
-            if intent.startswith("create")
-            else "consulter"
-            if intent.startswith("search")
-            else "modifier"
-        )
-
-        if not _has_permission(utilisateur, module, action):
-            return {
-                "reply": _denied(payload.langue, module, action),
-                "state": AssistantState().model_dump(),
-            }
-
-        if intent.startswith("create"):
-            initial_data = {}
-
-            initial_name = (
-                entities.get("client_name")
-                if entity == "client"
-                else entities.get("supplier_name")
+        if entity:
+            module, _ = _entity_meta(entity)
+            action = (
+                "creer"
+                if intent.startswith("create")
+                else "consulter"
+                if intent.startswith("search")
+                else "modifier"
             )
 
-            if initial_name:
-                initial_data["nom"] = initial_name
-                state = AssistantState(
-                    operation=intent,
-                    step="email",
-                    data=initial_data,
+            if not _has_permission(utilisateur, module, action):
+                return {
+                    "reply": _denied(payload.langue, module, action),
+                    "state": AssistantState().model_dump(),
+                }
+
+            if intent.startswith("create"):
+                initial_data = {}
+                initial_name = (
+                    entities.get("client_name")
+                    if entity == "client"
+                    else entities.get("supplier_name")
                 )
 
+                if initial_name:
+                    initial_data["nom"] = initial_name
+                    state = AssistantState(
+                        operation=f"create_{entity}",
+                        step="email",
+                        data=initial_data,
+                    )
+                    return {
+                        "reply": prompts["email"],
+                        "state": state.model_dump(),
+                    }
+
+                state = AssistantState(
+                    operation=f"create_{entity}",
+                    step="nom",
+                    data=initial_data,
+                )
                 return {
-                    "reply": prompts["email"],
+                    "reply": prompts["nom"],
                     "state": state.model_dump(),
                 }
 
+            if intent.startswith("search"):
+                query = m
+                for w in [
+                    "chercher", "rechercher", "recherche", "trouver",
+                    "cherche", "find", "search", "look for", "client",
+                    "clients", "customer", "customers", "fournisseur",
+                    "fournisseurs", "supplier", "suppliers", "بحث",
+                    "ابحث", "البحث", "عميل", "مورد",
+                ]:
+                    query = query.replace(w, " ")
+
+                rows = _find_entity(
+                    utilisateur, entity, query.strip()
+                ) if query.strip() else []
+
+                return {
+                    "reply": (
+                        _format_search(rows, entity, payload.langue)
+                        if rows
+                        else prompts["search"]
+                    ),
+                    "state": AssistantState().model_dump(),
+                }
+
             state = AssistantState(
-                operation=intent,
-                step="nom",
-                data=initial_data,
+                operation=f"edit_{entity}",
+                step="search",
+                data={},
             )
-
             return {
-                "reply": prompts["nom"],
+                "reply": prompts["search"],
                 "state": state.model_dump(),
             }
-
-        if intent.startswith("search"):
-            query = m
-
-            for w in [
-                "chercher", "rechercher", "recherche", "trouver", "cherche",
-                "find", "search", "look for", "client", "clients",
-                "customer", "customers", "fournisseur", "fournisseurs",
-                "supplier", "suppliers", "بحث", "ابحث", "البحث",
-                "عميل", "مورد",
-            ]:
-                query = query.replace(w, " ")
-
-            rows = (
-                _find_entity(utilisateur, entity, query.strip())
-                if query.strip()
-                else []
-            )
-
-            state = AssistantState()
-
-            return {
-                "reply": (
-                    _format_search(rows, entity, payload.langue)
-                    if rows
-                    else prompts["search"]
-                ),
-                "state": state.model_dump(),
-            }
-
-        state = AssistantState(
-            operation=intent,
-            step="search",
-            data={},
-        )
-
-        return {
-            "reply": prompts["search"],
-            "state": state.model_dump(),
-        }
 
     op = state.operation
     step = state.step
@@ -2209,19 +1826,14 @@ def chat(
 
     if op == "create_commande":
         if step == "client":
-            rows = _find_entity(
-                utilisateur,
-                "client",
-                payload.message,
-            )
+            rows = _find_entity(utilisateur, "client", payload.message)
 
             if len(rows) == 0 and payload.message.strip():
                 if not _has_permission(utilisateur, "clients", "creer"):
                     return {
                         "reply": (
                             _format_search(rows, "client", payload.langue)
-                            + "\n\n"
-                            + prompts["order_client"]
+                            + "\n\n" + prompts["order_client"]
                         ),
                         "state": state.model_dump(),
                     }
@@ -2229,11 +1841,9 @@ def chat(
                 data["new_client_nom"] = payload.message.strip()
                 state.step = "confirm_new_client"
                 state.data = data
-
                 return {
                     "reply": _new_client_question(
-                        payload.langue,
-                        data["new_client_nom"],
+                        payload.langue, data["new_client_nom"]
                     ),
                     "state": state.model_dump(),
                 }
@@ -2242,8 +1852,7 @@ def chat(
                 return {
                     "reply": (
                         _format_search(rows, "client", payload.langue)
-                        + "\n\n"
-                        + prompts["order_client"]
+                        + "\n\n" + prompts["order_client"]
                     ),
                     "state": state.model_dump(),
                 }
@@ -2252,7 +1861,6 @@ def chat(
             data["client_nom"] = rows[0]["nom"]
             data["lines"] = []
             state.step = "product"
-
             reply = (
                 f"Client sélectionné : {rows[0]['nom']}.\n\n"
                 f"{prompts['order_product']}"
@@ -2261,55 +1869,39 @@ def chat(
         elif step == "confirm_new_client":
             if _is_yes(m):
                 nom = data.get("new_client_nom", "")
-
                 try:
                     created = _create_entity(
-                        utilisateur,
-                        "client",
-                        {"nom": nom},
+                        utilisateur, "client", {"nom": nom}
                     )
-
                 except HTTPException as e:
                     state.step = "client"
-                    reply = (
-                        str(e.detail)
-                        + "\n\n"
-                        + prompts["order_client"]
-                    )
-
+                    reply = str(e.detail) + "\n\n" + prompts["order_client"]
                 else:
                     data["client_id"] = created["id"]
                     data["client_nom"] = created["nom"]
                     data["lines"] = []
                     data.pop("new_client_nom", None)
                     state.step = "product"
-
                     reply = (
                         _new_client_created(payload.langue, created["nom"])
-                        + "\n\n"
-                        + prompts["order_product"]
+                        + "\n\n" + prompts["order_product"]
                     )
-
             elif _is_no(m):
                 data.pop("new_client_nom", None)
                 state.step = "client"
                 reply = prompts["order_client"]
-
             else:
                 reply = _new_client_question(
-                    payload.langue,
-                    data.get("new_client_nom", ""),
+                    payload.langue, data.get("new_client_nom", "")
                 )
 
         elif step == "product":
             rows = _search_products(utilisateur, payload.message)
-
             if len(rows) != 1:
                 return {
                     "reply": (
                         _format_products(rows, payload.langue)
-                        + "\n\n"
-                        + prompts["order_product"]
+                        + "\n\n" + prompts["order_product"]
                     ),
                     "state": state.model_dump(),
                 }
@@ -2320,9 +1912,7 @@ def chat(
                 "prix": rows[0]["prix_unitaire"],
                 "stock": rows[0]["stock_actuel"],
             }
-
             state.step = "quantity"
-
             reply = (
                 f"Produit sélectionné : {rows[0]['nom']} | "
                 f"Prix unitaire : {rows[0]['prix_unitaire']:.2f} | "
@@ -2337,26 +1927,20 @@ def chat(
                 qty = 0
 
             cp = data.get("current_product", {})
-
             if qty <= 0:
                 reply = prompts["order_qty"]
-
             elif qty > cp.get("stock", 0):
                 reply = (
                     f"Stock insuffisant : {cp.get('stock', 0)} disponible(s).\n\n"
                     f"{prompts['order_qty']}"
                 )
-
             else:
-                data["lines"].append(
-                    {
-                        "produit_id": cp["id"],
-                        "nom": cp["nom"],
-                        "quantite": qty,
-                        "prix": cp["prix"],
-                    }
-                )
-
+                data["lines"].append({
+                    "produit_id": cp["id"],
+                    "nom": cp["nom"],
+                    "quantite": qty,
+                    "prix": cp["prix"],
+                })
                 data.pop("current_product", None)
                 state.step = "more"
                 reply = prompts["order_more"]
@@ -2365,94 +1949,63 @@ def chat(
             if _is_yes(m):
                 state.step = "product"
                 reply = prompts["order_product"]
-
             elif _is_no(m):
                 total = sum(
                     Decimal(str(x["prix"])) * x["quantite"]
                     for x in data.get("lines", [])
                 ).quantize(Decimal("0.01"))
-
                 data["total"] = float(total)
-
                 state.step = "confirmation"
-
                 lines = "\n".join(
                     f"- {x['nom']} × {x['quantite']} = "
                     f"{Decimal(str(x['prix'])) * x['quantite']:.2f}"
                     for x in data["lines"]
                 )
-
                 reply = (
-                    f"Récapitulatif de la commande\n"
-                    f"Client : {data['client_nom']}\n"
-                    f"{lines}\n"
-                    f"Total : {total:.2f}\n\n"
-                    f"{prompts['order_confirm']}"
+                    "Récapitulatif de la commande\n"
+                    f"Client : {data['client_nom']}\n{lines}\n"
+                    f"Total : {total:.2f}\n\n{prompts['order_confirm']}"
                 )
-
             else:
                 reply = prompts["order_more"]
 
         elif step == "confirmation":
             if _is_yes(m):
                 result = _create_order(
-                    utilisateur,
-                    data["client_id"],
-                    data["lines"],
+                    utilisateur, data["client_id"], data["lines"]
                 )
-
                 data["commande_id"] = result["id"]
                 data["numero"] = result["numero"]
                 state.step = "facturation"
-
                 reply = (
                     f"Commande {result['numero']} créée avec succès. "
-                    f"Total : {result['total']:.2f}.\n\n"
-                    f"{prompts['invoice']}"
+                    f"Total : {result['total']:.2f}.\n\n{prompts['invoice']}"
                 )
-
             elif _is_no(m):
                 state = AssistantState()
-
                 reply = (
-                    "Opération annulée."
-                    if payload.langue == "fr"
-                    else "Operation cancelled."
+                    "Operation cancelled."
                     if payload.langue == "en"
                     else "تم إلغاء العملية."
+                    if payload.langue == "ar"
+                    else "Opération annulée."
                 )
-
             else:
                 reply = prompts["order_confirm"]
 
         elif step == "facturation":
             if _is_yes(m):
-                if not _has_permission(
-                    utilisateur,
-                    "facturation",
-                    "creer",
-                ):
+                if not _has_permission(utilisateur, "facturation", "creer"):
                     state = AssistantState()
                     reply = _denied(
-                        payload.langue,
-                        "facturation",
-                        "creer",
+                        payload.langue, "facturation", "creer"
                     )
-
                 else:
-                    inv = _create_invoice(
-                        utilisateur,
-                        data["commande_id"],
-                    )
-
+                    inv = _create_invoice(utilisateur, data["commande_id"])
                     state = AssistantState()
-                    reply = (
-                        f"Facture {inv['numero']} créée avec succès."
-                    )
-
+                    reply = f"Facture {inv['numero']} créée avec succès."
             elif _is_no(m):
                 state = AssistantState()
-
                 reply = (
                     "Commande conservée sans facturation."
                     if payload.langue == "fr"
@@ -2460,7 +2013,6 @@ def chat(
                     if payload.langue == "en"
                     else "تم الاحتفاظ بالطلب بدون فوترة."
                 )
-
             else:
                 reply = prompts["invoice"]
 
@@ -2469,74 +2021,44 @@ def chat(
             reply = _guide(payload.langue, payload.module)
 
         state.data = data
+        return {"reply": reply, "state": state.model_dump()}
 
-        return {
-            "reply": reply,
-            "state": state.model_dump(),
-        }
-
-    # Compatibilité avec les intents create_fournisseur / edit_fournisseur
-    # et les anciens noms create_supplier / edit_supplier.
+    # Noms canoniques des opérations fournisseur.
     if op in {
-        "create_client",
-        "create_supplier",
-        "create_fournisseur",
+        "create_client", "create_supplier", "create_fournisseur",
     }:
         entity = "client" if op == "create_client" else "fournisseur"
 
         if step == "nom":
-            data["nom"] = m
+            data["nom"] = payload.message.strip()
             state.step = "email"
             reply = prompts["email"]
-
         elif step == "email":
-            data["email"] = (
-                "" if _is_skip(m) else payload.message.strip()
-            )
+            data["email"] = "" if _is_skip(m) else payload.message.strip()
             state.step = "telephone"
             reply = prompts["telephone"]
-
         elif step == "telephone":
-            data["telephone"] = (
-                "" if _is_skip(m) else payload.message.strip()
-            )
+            data["telephone"] = "" if _is_skip(m) else payload.message.strip()
             state.step = "adresse"
             reply = prompts["adresse"]
-
         elif step == "adresse":
-            data["adresse"] = (
-                "" if _is_skip(m) else payload.message.strip()
-            )
+            data["adresse"] = "" if _is_skip(m) else payload.message.strip()
             state.step = "confirmation"
-
-            reply = (
-                _summary(entity, data, payload.langue)
-                + "\n\n"
-                + prompts["confirm"]
-            )
-
+            reply = _summary(entity, data, payload.langue) + "\n\n" + prompts["confirm"]
         elif step == "confirmation":
             if _is_yes(m):
                 result = _create_entity(utilisateur, entity, data)
                 state = AssistantState()
                 label = _label(entity, payload.langue)
-
-                if payload.langue == "en":
-                    reply = (
-                        f"{label.capitalize()} created successfully: "
-                        f"{result['nom']}."
-                    )
-                elif payload.langue == "ar":
-                    reply = f"تم إنشاء {label} بنجاح: {result['nom']}."
-                else:
-                    reply = (
-                        f"Le {label} « {result['nom']} » "
-                        "a été créé avec succès."
-                    )
-
+                reply = (
+                    f"{label.capitalize()} created successfully: {result['nom']}."
+                    if payload.langue == "en"
+                    else f"تم إنشاء {label} بنجاح: {result['nom']}."
+                    if payload.langue == "ar"
+                    else f"Le {label} « {result['nom']} » a été créé avec succès."
+                )
             elif _is_no(m):
                 state = AssistantState()
-
                 reply = (
                     "Operation cancelled."
                     if payload.langue == "en"
@@ -2544,56 +2066,39 @@ def chat(
                     if payload.langue == "ar"
                     else "Opération annulée."
                 )
-
             else:
                 reply = prompts["confirm"]
-
         else:
             state = AssistantState()
             reply = _guide(payload.langue, payload.module)
 
         state.data = data
-
-        return {
-            "reply": reply,
-            "state": state.model_dump(),
-        }
+        return {"reply": reply, "state": state.model_dump()}
 
     if op in {
-        "edit_client",
-        "edit_supplier",
-        "edit_fournisseur",
+        "edit_client", "edit_supplier", "edit_fournisseur",
     }:
         entity = "client" if op == "edit_client" else "fournisseur"
 
         if step == "search":
-            rows = _find_entity(
-                utilisateur,
-                entity,
-                payload.message,
-            )
+            rows = _find_entity(utilisateur, entity, payload.message)
 
             if not rows:
-                reply = (
-                    "No matching record was found. Please give another name."
-                    if payload.langue == "en"
-                    else "Aucun enregistrement trouvé. Donnez un autre nom."
-                    if payload.langue == "fr"
-                    else "لم يتم العثور على سجل مطابق. أعطني اسماً آخر."
-                )
-
                 return {
-                    "reply": reply,
+                    "reply": (
+                        "No matching record was found. Please give another name."
+                        if payload.langue == "en"
+                        else "لم يتم العثور على سجل مطابق. أعطني اسماً آخر."
+                        if payload.langue == "ar"
+                        else "Aucun enregistrement trouvé. Donnez un autre nom."
+                    ),
                     "state": state.model_dump(),
                 }
 
             if len(rows) > 1:
                 return {
-                    "reply": (
-                        _format_search(rows, entity, payload.langue)
-                        + "\n\n"
-                        + prompts["search"]
-                    ),
+                    "reply": _format_search(rows, entity, payload.langue)
+                    + "\n\n" + prompts["search"],
                     "state": state.model_dump(),
                 }
 
@@ -2605,56 +2110,31 @@ def chat(
                 "telephone": rows[0].get("telephone"),
                 "adresse": rows[0].get("adresse"),
             }
-
             return {
-                "reply": (
-                    _format_search(rows, entity, payload.langue)
-                    + "\n\n"
-                    + prompts["field"]
-                ),
+                "reply": _format_search(rows, entity, payload.langue)
+                + "\n\n" + prompts["field"],
                 "state": state.model_dump(),
             }
 
         if step == "field":
             aliases = {
-                "nom": "nom",
-                "name": "nom",
-                "اسم": "nom",
-                "email": "email",
-                "e-mail": "email",
-                "البريد": "email",
-                "telephone": "telephone",
-                "téléphone": "telephone",
-                "phone": "telephone",
-                "هاتف": "telephone",
-                "adresse": "adresse",
-                "address": "adresse",
-                "العنوان": "adresse",
+                "nom": "nom", "name": "nom", "اسم": "nom",
+                "email": "email", "e-mail": "email", "البريد": "email",
+                "telephone": "telephone", "téléphone": "telephone",
+                "phone": "telephone", "هاتف": "telephone",
+                "adresse": "adresse", "address": "adresse", "العنوان": "adresse",
             }
-
-            field = next(
-                (v for k, v in aliases.items() if k in m),
-                None,
-            )
-
+            field = next((v for k, v in aliases.items() if k in m), None)
             if not field:
-                return {
-                    "reply": prompts["field"],
-                    "state": state.model_dump(),
-                }
+                return {"reply": prompts["field"], "state": state.model_dump()}
 
             state.data["field"] = field
             state.step = "value"
-
-            return {
-                "reply": prompts["value"],
-                "state": state.model_dump(),
-            }
+            return {"reply": prompts["value"], "state": state.model_dump()}
 
         if step == "value":
             state.data["value"] = payload.message.strip()
             state.step = "confirmation"
-
             field = state.data["field"]
             old = state.data.get(field) or (
                 "non renseigné"
@@ -2663,17 +2143,10 @@ def chat(
                 if payload.langue == "en"
                 else "غير محدد"
             )
-
             label = {
-                "fr": (
-                    "client" if entity == "client" else "fournisseur"
-                ),
-                "en": (
-                    "customer" if entity == "client" else "supplier"
-                ),
-                "ar": (
-                    "العميل" if entity == "client" else "المورد"
-                ),
+                "fr": "client" if entity == "client" else "fournisseur",
+                "en": "customer" if entity == "client" else "supplier",
+                "ar": "العميل" if entity == "client" else "المورد",
             }[payload.langue]
 
             if payload.langue == "fr":
@@ -2682,14 +2155,12 @@ def chat(
                     f"- {field} : {old} → {state.data['value']}\n\n"
                     f"{prompts['editconfirm']}"
                 )
-
             elif payload.langue == "en":
                 reply = (
                     f"Modification for {label} “{state.data['nom']}”:\n"
                     f"- {field}: {old} → {state.data['value']}\n\n"
                     f"{prompts['editconfirm']}"
                 )
-
             else:
                 reply = (
                     f"تعديل {label} «{state.data['nom']}»:\n"
@@ -2697,10 +2168,7 @@ def chat(
                     f"{prompts['editconfirm']}"
                 )
 
-            return {
-                "reply": reply,
-                "state": state.model_dump(),
-            }
+            return {"reply": reply, "state": state.model_dump()}
 
         if step == "confirmation":
             if _is_yes(m):
@@ -2711,33 +2179,27 @@ def chat(
                     state.data["field"],
                     state.data["value"],
                 )
-
                 state = AssistantState()
-
-                reply = (
-                    "Modification completed successfully."
-                    if payload.langue == "en"
-                    else "تم تعديل السجل بنجاح."
-                    if payload.langue == "ar"
-                    else "La modification a été enregistrée avec succès."
-                )
-
                 return {
-                    "reply": reply,
+                    "reply": (
+                        "Modification completed successfully."
+                        if payload.langue == "en"
+                        else "تم تعديل السجل بنجاح."
+                        if payload.langue == "ar"
+                        else "La modification a été enregistrée avec succès."
+                    ),
                     "state": state.model_dump(),
                 }
 
             if _is_no(m):
-                reply = (
-                    "Operation cancelled."
-                    if payload.langue == "en"
-                    else "تم إلغاء العملية."
-                    if payload.langue == "ar"
-                    else "Modification annulée."
-                )
-
                 return {
-                    "reply": reply,
+                    "reply": (
+                        "Operation cancelled."
+                        if payload.langue == "en"
+                        else "تم إلغاء العملية."
+                        if payload.langue == "ar"
+                        else "Modification annulée."
+                    ),
                     "state": AssistantState().model_dump(),
                 }
 
@@ -2746,30 +2208,69 @@ def chat(
                 "state": state.model_dump(),
             }
 
-    # RAG local avant les réponses analytiques et le guide générique.
-    sources = _rechercher_chunks_rag(
-        utilisateur,
-        payload.message,
-    )
+    # Recherche documentaire locale : aucune clé API n'est requise pour récupérer
+    # les passages. La génération de réponse reste facultative.
+    sources = []
+    answer = None
+    rag_error = False
 
-    answer = _reponse_rag(sources, payload.langue)
+    try:
+        sources = _rechercher_chunks_rag(utilisateur, payload.message)
+    except RuntimeError:
+        import logging
+        logging.getLogger("erp.rag").exception(
+            "Recherche sémantique RAG indisponible"
+        )
+        rag_error = True
 
+    if rag_error:
+        answer = (
+            "Le moteur de recherche documentaire local n'est pas prêt. "
+            "Vérifiez le modèle d'embeddings dans le backend."
+            if payload.langue == "fr"
+            else "The local document search engine is not ready. "
+                 "Check the backend embedding model."
+            if payload.langue == "en"
+            else "محرك البحث المحلي في الوثائق غير جاهز. "
+                 "تحقق من نموذج التضمين في الخادم."
+        )
+    elif sources:
+        answer = _reponse_rag(sources, payload.langue)
+
+        # La génération peut être indisponible : les extraits et leurs sources
+        # restent alors disponibles comme réponse de repli.
+        try:
+            from app.services.rag_generation import generer_reponse
+            reponse_generee = generer_reponse(
+                payload.message, sources, payload.langue
+            )
+            if reponse_generee:
+                answer = reponse_generee
+        except Exception:
+            import logging
+            logging.getLogger("erp.rag").exception(
+                "Génération RAG indisponible; conservation des extraits récupérés"
+            )
+
+    # Les questions analytiques et les données ERP gardent la priorité
+    # sur le message générique, mais ne remplacent pas un résultat RAG.
     if answer is None:
         answer = _analytics_answer(
-            payload.message,
-            payload.langue,
-            utilisateur,
+            payload.message, payload.langue, utilisateur
         )
 
     if answer is None:
         answer = _answer_data(
-            payload.message,
-            payload.langue,
-            utilisateur,
+            payload.message, payload.langue, utilisateur
         )
 
+    # Ne pas afficher le guide générique lorsqu'une question documentaire
+    # n'a pas de réponse dans les documents récupérés.
     if answer is None:
-        answer = _guide(payload.langue, payload.module)
+        if _is_documentary_question(payload.message):
+            answer = _document_not_found(payload.langue)
+        else:
+            answer = _guide(payload.langue, payload.module)
 
     return {
         "reply": answer,

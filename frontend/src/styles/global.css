@@ -1470,6 +1470,10 @@ a {
 }
 
 
+/* Correctif cible pour le titre Mes appareils */
+.appareils-page {
+  padding-top: calc(64px + 1.5rem);
+}
 /* ===== Paramètres / activation des fonctionnalités ===== */
 .parametres-page { max-width: 1100px; }
 .parametres-page .page-head h1 { display:flex; align-items:center; gap:.5rem; }
@@ -1605,3 +1609,11 @@ a {
 .assistant-docs__vide { color:var(--text-muted); }
 .assistant-docs__spin { animation: assistant-docs-spin 1s linear infinite; }
 @keyframes assistant-docs-spin { to { transform: rotate(360deg); } }
+
+/* --- Appareils / securite --- */
+.appareils-page { padding-top: 96px; }
+.activite-liste { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.activite-item { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; font-size: 0.9rem; }
+.activite-date { opacity: 0.7; min-width: 9.5rem; }
+.activite-gravite--avertissement { color: #b45309; }
+.activite-gravite--critique { color: #b91c1c; font-weight: 600; }

@@ -16,6 +16,7 @@ from app.security.recaptcha import verifier_recaptcha
 from app.security.validation_inscription import valider_mot_de_passe
 from app.security import password_reset_store as reset_store
 from app.security.sessions import emettre_jeton, revoquer_sessions_par_email
+from app.security.audit import journaliser
 from app.utils.email_sender import envoyer_code_reinitialisation
 from fastapi.responses import JSONResponse
 
@@ -103,6 +104,9 @@ async def login(payload: LoginPayload, request: Request):
         mot_de_passe_valide = bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
         if not mot_de_passe_valide:
+            journaliser("connexion_echouee", gravite="avertissement", succes=False,
+                        type_compte="plateforme", email=email, request=request,
+                        details={"raison": "identifiants"})
             enregistrer_echec(email)
             etat_apres = etat_protection(email)
             return JSONResponse(status_code=401, content={
@@ -219,6 +223,10 @@ async def login(payload: LoginPayload, request: Request):
 
     # Ni super_admin, ni compte d'entreprise valide : même message
     # générique dans tous les cas (anti-énumération).
+    journaliser("connexion_echouee", gravite="avertissement", succes=False,
+                type_compte=(ligne_index[2] if ligne_index else None), email=email,
+                entreprise_id=(ligne_index[0] if ligne_index else None), request=request,
+                details={"raison": "identifiants"})
     enregistrer_echec(email)
     etat_apres = etat_protection(email)
     return JSONResponse(status_code=401, content={
@@ -387,6 +395,8 @@ def reinitialiser_mot_de_passe(payload: ReinitialiserMotDePassePayload):
     # Le mot de passe a changé : on ferme toutes les sessions ouvertes de
     # ce compte (un éventuel intrus qui aurait déjà un jeton est expulsé).
     revoquer_sessions_par_email(email, "mot_de_passe_reinitialise", "plateforme")
+    journaliser("mdp_reinitialise", gravite="avertissement", succes=True,
+                type_compte="plateforme", email=email)
 
     # Par sécurité, on efface aussi les échecs de connexion enregistrés
     # pour cet email : un nouveau mot de passe légitime ne doit pas

@@ -11,6 +11,7 @@ import {
   listerMesSessions,
   listerSessionsEntreprise,
 } from "../api/sessionsApi";
+import ActiviteRecente from "../components/ActiviteRecente";
 
 function formaterDate(iso) {
   return new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
@@ -138,6 +139,9 @@ export default function Appareils() {
           ))}
         </ul>
       </section>
+
+      <ActiviteRecente />
+      {admin && <ActiviteRecente admin />}
 
       {admin && (
         <section className="panel appareils-section">

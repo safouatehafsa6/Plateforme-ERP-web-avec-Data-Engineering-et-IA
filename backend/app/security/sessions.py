@@ -1,9 +1,9 @@
 """Sessions actives : emission du JWT avec jti, verification a chaque
-requete, revocation.
+requete, revocation, plafond de sessions, journal de securite.
 
 Toutes les sessions sont stockees dans la base centrale
-(table session_utilisateur, voir 006_sessions_utilisateur.sql), pour les
-trois profils : plateforme (super admin), interne et externe.
+(table session_utilisateur), pour les trois profils : plateforme
+(super admin), interne et externe.
 """
 import ipaddress
 import os
@@ -15,10 +15,10 @@ import jwt
 from fastapi import HTTPException, Request
 
 from app.db import pool_central
+from app.security.audit import journaliser
 
 DUREE_SESSION = timedelta(hours=8)
-# On ne met a jour "derniere_activite" qu'une fois par minute au plus,
-# pour ne pas ecrire en base a chaque requete.
+# On ne met a jour "derniere_activite" qu'une fois par minute au plus.
 INTERVALLE_ACTIVITE = timedelta(seconds=60)
 
 
@@ -38,14 +38,13 @@ NB_PROXIES_CONFIANCE = _lire_entier_env("TRUST_PROXY_HOPS", 1, 1, 5)
 
 
 def adresse_ip(request: Request) -> str | None:
-    # Derriere un reverse proxy (nginx, Traefik...), l'IP reelle est dans
-    # X-Forwarded-For. On ne lui fait confiance que si TRUST_PROXY=1,
-    # sinon n'importe quel client pourrait falsifier son adresse.
+    # Derriere un reverse proxy, l'IP reelle est dans X-Forwarded-For. On ne
+    # lui fait confiance que si TRUST_PROXY=1 (sinon l'IP serait falsifiable).
     if os.getenv("TRUST_PROXY", "0") == "1":
         transfere = request.headers.get("x-forwarded-for")
         if transfere:
-            # On prend le saut ajoute par NOTRE proxy (en partant de la droite) :
-            # les entrees de gauche sont fournies par le client, donc falsifiables.
+            # Saut ajoute par NOTRE proxy (en partant de la droite) : les
+            # entrees de gauche sont fournies par le client.
             sauts = [s.strip() for s in transfere.split(",") if s.strip()]
             if len(sauts) >= NB_PROXIES_CONFIANCE:
                 try:
@@ -71,7 +70,7 @@ def analyser_user_agent(ua: str | None) -> dict:
     elif "Linux" in ua:
         systeme = "Linux"
     else:
-        systeme = "Système inconnu"
+        systeme = "Syst\u00e8me inconnu"
 
     # L'ordre compte : Edge et Opera contiennent aussi "Chrome" et "Safari".
     if "Edg/" in ua or "EdgA/" in ua or "EdgiOS/" in ua:
@@ -102,6 +101,7 @@ def emettre_jeton(claims: dict, request: Request) -> str:
     ua = request.headers.get("user-agent", "")
     info = analyser_user_agent(ua)
     entreprise_id = claims.get("entrepriseId")
+    nb_limite = 0
 
     conn = pool_central.getconn()
     try:
@@ -133,6 +133,7 @@ def emettre_jeton(claims: dict, request: Request) -> str:
                     MAX_SESSIONS_PAR_UTILISATEUR - 1,
                 ),
             )
+            nb_limite = cur.rowcount
             cur.execute(
                 """
                 INSERT INTO session_utilisateur
@@ -152,6 +153,16 @@ def emettre_jeton(claims: dict, request: Request) -> str:
     finally:
         pool_central.putconn(conn)
 
+    # Journal (apres le commit, jamais bloquant).
+    commun = dict(
+        type_compte=claims["type"], utilisateur_id=claims["id"], email=claims["email"],
+        entreprise_id=entreprise_id, jti=jti, request=request,
+    )
+    journaliser("connexion_reussie", succes=True, **commun)
+    if nb_limite:
+        journaliser("session_revoquee", gravite="avertissement",
+                    details={"motif": "limite_sessions", "nb": nb_limite}, **commun)
+
     return jwt.encode(
         {**claims, "jti": jti, "exp": expiration},
         os.environ["JWT_SECRET"],
@@ -161,8 +172,7 @@ def emettre_jeton(claims: dict, request: Request) -> str:
 
 def verifier_session(charge: dict) -> None:
     """A appeler apres le decodage du JWT : leve 401 si la session est
-    inconnue, revoquee ou expiree. Un jeton sans jti (emis avant cette
-    fonctionnalite) est refuse : la personne doit se reconnecter."""
+    inconnue, revoquee ou expiree. Un jeton sans jti est refuse."""
     jti = charge.get("jti")
     if not jti:
         raise HTTPException(status_code=401, detail="Session invalide, merci de vous reconnecter.")
@@ -180,7 +190,7 @@ def verifier_session(charge: dict) -> None:
             if not ligne or ligne[0] is not None or ligne[1] <= maintenant:
                 raise HTTPException(
                     status_code=401,
-                    detail="Cette session a été fermée ou a expiré. Merci de vous reconnecter.",
+                    detail="Cette session a \u00e9t\u00e9 ferm\u00e9e ou a expir\u00e9. Merci de vous reconnecter.",
                 )
 
             if maintenant - ligne[2] > INTERVALLE_ACTIVITE:
@@ -211,6 +221,10 @@ def revoquer_sessions_par_email(email: str, motif: str, type_compte: str | None 
             cur.execute(requete, params)
             nombre = cur.rowcount
         conn.commit()
-        return nombre
     finally:
         pool_central.putconn(conn)
+
+    if nombre:
+        journaliser("session_revoquee", gravite="avertissement", type_compte=type_compte,
+                    email=email, details={"motif": motif, "nb": nombre})
+    return nombre

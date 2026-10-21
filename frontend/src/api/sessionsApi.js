@@ -40,3 +40,7 @@ export async function deconnecter() {
     localStorage.removeItem("token");
   }
 }
+
+// Journal de securite (phase A)
+export const listerMesEvenements = (limite = 20) => appelAuth("GET", `/sessions/evenements?limit=${limite}`);
+export const listerEvenementsEntreprise = (limite = 30) => appelAuth("GET", `/admin/sessions/evenements?limit=${limite}`);

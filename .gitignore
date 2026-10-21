@@ -9,3 +9,8 @@ backend_avant_*/
 
 .env
 !.env.example
+
+frontend/dist/
+frontend/node_modules/
+extraction-*.txt
+*.bak

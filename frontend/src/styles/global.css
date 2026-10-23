@@ -1617,3 +1617,356 @@ a {
 .activite-date { opacity: 0.7; min-width: 9.5rem; }
 .activite-gravite--avertissement { color: #b45309; }
 .activite-gravite--critique { color: #b91c1c; font-weight: 600; }
+
+/* ---- Pages publiques : Fonctionnalités et Tarifs ---- */
+.vitrine {
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: calc(64px + 3rem) 1.75rem 4rem;
+  color: var(--text-dark);
+}
+.vitrine__titre {
+  font-family: "Fraunces", serif;
+  font-weight: 600;
+  font-size: clamp(1.8rem, 4vw, 2.6rem);
+  line-height: 1.15;
+  margin: 0 0 1rem;
+  max-width: 24ch;
+}
+.vitrine__intro {
+  color: var(--text-muted);
+  font-size: 1.05rem;
+  line-height: 1.6;
+  max-width: 62ch;
+  margin: 0 0 2.5rem;
+}
+.vitrine-liste {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0 2.5rem;
+  margin: 0 0 2.5rem;
+}
+.vitrine-liste__item {
+  border-top: 1px solid var(--paper-line);
+  padding: 1.1rem 0 1.4rem;
+}
+.vitrine-liste dt {
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+.vitrine-liste dd {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.vitrine-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+.vitrine-plan {
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
+  border-radius: 8px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.vitrine-plan h2 {
+  font-family: "Fraunces", serif;
+  font-size: 1.25rem;
+  margin: 0;
+}
+.vitrine-plan p { margin: 0; color: var(--text-muted); line-height: 1.5; }
+.vitrine-plan .vitrine-plan__prix {
+  color: var(--text-dark);
+  font-size: 1.6rem;
+  font-weight: 600;
+  margin-top: 0.6rem;
+}
+.vitrine-plan .vitrine__bouton { margin-top: auto; align-self: flex-start; }
+.vitrine-plan > p:nth-of-type(3) { margin-bottom: 1.25rem; }
+.vitrine__bouton {
+  display: inline-block;
+  padding: 0.65rem 1.2rem;
+  background: var(--brass);
+  color: #fff;
+  border-radius: 6px;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+.vitrine__bouton:hover { background: var(--brass-dark); }
+.vitrine__bouton:focus-visible { outline: 2px solid var(--brass-dark); outline-offset: 2px; }
+
+/* ---- Saisie intelligente (suggestions pendant la frappe) ---- */
+.champ-suggestions { position: relative; flex: 1; min-width: 0; }
+.champ-suggestions input { width: 100%; box-sizing: border-box; }
+.champ-suggestions__liste {
+  position: absolute; left: 0; right: 0; bottom: calc(100% + 6px);
+  margin: 0; padding: 4px; list-style: none; z-index: 20;
+  max-height: 240px; overflow-y: auto;
+  background: var(--carte-fond); color: var(--text-dark);
+  border: 1px solid var(--paper-line); border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+.champ-suggestions__option {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 0.45rem 0.6rem; border-radius: 6px; cursor: pointer; font-size: 0.82rem;
+}
+.champ-suggestions__option--active, .champ-suggestions__option:hover { background: var(--paper); }
+.champ-suggestions__texte { font-weight: 600; }
+.champ-suggestions__meta { color: var(--text-muted); font-size: 0.74rem; }
+
+/* ======================================================================
+   Pages publiques animées : Fonctionnalités et Tarifs
+   ====================================================================== */
+.vitrine-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(1200px 600px at 15% -10%, color-mix(in srgb, var(--brass) 14%, transparent), transparent 60%),
+    radial-gradient(900px 600px at 100% 30%, color-mix(in srgb, var(--teal) 16%, transparent), transparent 60%),
+    var(--paper);
+}
+.vitrine-page .vitrine { position: relative; z-index: 1; }
+
+/* ---- Fond animé ---- */
+.fond-anime { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
+.fond-anime__blob {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.45;
+  animation: blob-flotte 18s ease-in-out infinite alternate;
+}
+.fond-anime__blob--1 { width: 440px; height: 440px; background: var(--brass); top: -120px; left: -100px; }
+.fond-anime__blob--2 { width: 520px; height: 520px; background: var(--teal); top: 30%; right: -160px; animation-duration: 24s; }
+.fond-anime__blob--3 { width: 380px; height: 380px; background: var(--brass-dark); bottom: -140px; left: 30%; animation-duration: 21s; opacity: 0.3; }
+@keyframes blob-flotte {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(60px, 40px) scale(1.15); }
+  100% { transform: translate(-40px, 80px) scale(0.95); }
+}
+.fond-anime__grille {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(var(--paper-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--paper-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  opacity: 0.45;
+  mask-image: radial-gradient(ellipse at 50% 30%, #000 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 30%, #000 20%, transparent 75%);
+  animation: grille-derive 30s linear infinite;
+}
+@keyframes grille-derive { to { background-position: 56px 56px, 56px 56px; } }
+.fond-anime__reseau { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fond-anime__lien {
+  stroke: var(--teal);
+  stroke-width: 0.12;
+  stroke-dasharray: 1.2 1.6;
+  opacity: 0.55;
+  animation: lien-defile 5s linear infinite;
+}
+@keyframes lien-defile { to { stroke-dashoffset: -14; } }
+.fond-anime__noeud {
+  position: absolute;
+  width: 9px; height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--brass);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass) 60%, transparent);
+  animation: noeud-pulse 3.2s ease-out infinite;
+}
+@keyframes noeud-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brass) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 16px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.fond-anime__particule {
+  position: absolute;
+  bottom: -10px;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--brass);
+  opacity: 0;
+  animation: particule-monte linear infinite;
+}
+@keyframes particule-monte {
+  0%   { transform: translateY(0); opacity: 0; }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.5; }
+  100% { transform: translateY(-110vh); opacity: 0; }
+}
+
+/* ---- Titres et apparition ---- */
+.vitrine__titre--anime {
+  background: linear-gradient(100deg, var(--text-dark) 20%, var(--brass) 50%, var(--text-dark) 80%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: titre-entree 0.9s cubic-bezier(.2,.8,.2,1) both, titre-brille 7s ease-in-out 1s infinite;
+}
+@keyframes titre-entree { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+@keyframes titre-brille { 0%, 100% { background-position: 100% 0; } 50% { background-position: 0 0; } }
+.vitrine__intro--anime { animation: titre-entree 0.9s cubic-bezier(.2,.8,.2,1) 0.15s both; }
+
+.apparition { opacity: 0; transform: translateY(28px) scale(0.97); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(.2,.8,.2,1); height: 100%; }
+.apparition--visible { opacity: 1; transform: none; }
+
+/* ---- Cartes fonctionnalités (cliquables) ---- */
+.feat-grille {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+.feat-carte, .vitrine-plan--anime { --mx: 50%; --my: 50%; }
+.feat-carte {
+  position: relative;
+  width: 100%; height: 100%;
+  display: flex; align-items: center; gap: 0.9rem;
+  padding: 1.1rem 1.2rem;
+  background: var(--carte-fond);
+  border: 1px solid var(--paper-line);
+  border-radius: 14px;
+  color: var(--text-dark);
+  font-size: 1rem; font-weight: 600; text-align: start;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(.2,.8,.2,1), box-shadow 0.25s, border-color 0.25s;
+}
+.feat-carte::before, .vitrine-plan--anime::before {
+  content: "";
+  position: absolute; inset: 0;
+  background: radial-gradient(180px circle at var(--mx) var(--my), color-mix(in srgb, var(--brass) 22%, transparent), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  pointer-events: none;
+}
+.feat-carte:hover::before, .vitrine-plan--anime:hover::before { opacity: 1; }
+.feat-carte:hover { transform: translateY(-5px); box-shadow: 0 14px 30px rgba(14, 34, 51, 0.16); border-color: var(--brass); }
+.feat-carte:active { transform: translateY(-1px) scale(0.97); }
+.feat-carte:focus-visible { outline: 2px solid var(--brass); outline-offset: 3px; }
+.feat-carte--active {
+  border-color: var(--brass);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--brass) 45%, transparent), 0 14px 30px rgba(14, 34, 51, 0.16);
+}
+.feat-carte__icone {
+  position: relative;
+  display: grid; place-items: center;
+  width: 46px; height: 46px; flex: none;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--brass) 16%, transparent);
+  color: var(--brass-dark);
+  transition: transform 0.35s cubic-bezier(.3,1.6,.5,1), background 0.25s, color 0.25s;
+}
+.feat-carte:hover .feat-carte__icone { transform: rotate(-8deg) scale(1.12); }
+.feat-carte--active .feat-carte__icone { background: var(--brass); color: #fff; animation: icone-saut 0.5s cubic-bezier(.3,1.6,.5,1); }
+@keyframes icone-saut { 0% { transform: scale(0.6); } 100% { transform: scale(1); } }
+.feat-carte__titre { position: relative; }
+
+/* ---- Panneau de détail ---- */
+.feat-detail {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 2rem;
+  align-items: center;
+  padding: 2rem;
+  background: linear-gradient(135deg, var(--ink) 0%, var(--ink-soft) 100%);
+  color: var(--texte-sur-sombre);
+  border-radius: 18px;
+  box-shadow: 0 24px 50px rgba(14, 34, 51, 0.28);
+  animation: detail-entree 0.5s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes detail-entree { from { opacity: 0; transform: translateY(18px) scale(0.98); } to { opacity: 1; transform: none; } }
+.feat-detail__icone {
+  display: inline-grid; place-items: center;
+  width: 64px; height: 64px;
+  border-radius: 18px;
+  background: var(--brass); color: #fff;
+  margin-bottom: 1rem;
+  animation: icone-flotte 3.5s ease-in-out infinite;
+}
+@keyframes icone-flotte { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+.feat-detail h2 { font-family: "Fraunces", serif; font-size: 1.7rem; margin: 0 0 0.6rem; }
+.feat-detail p { margin: 0 0 1.4rem; line-height: 1.65; color: rgba(245, 243, 239, 0.82); max-width: 52ch; }
+.feat-detail__visuel {
+  display: flex; align-items: flex-end; justify-content: center; gap: 10px;
+  height: 170px;
+  padding: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.feat-detail__visuel span {
+  flex: 1; max-width: 34px; height: var(--h);
+  border-radius: 6px 6px 2px 2px;
+  background: linear-gradient(180deg, var(--brass), var(--teal));
+  transform-origin: bottom;
+  animation: barre-monte 0.9s cubic-bezier(.2,.8,.2,1) both, barre-respire 3s ease-in-out 1s infinite;
+}
+@keyframes barre-monte { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes barre-respire { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.82); } }
+@media (max-width: 760px) { .feat-detail { grid-template-columns: 1fr; padding: 1.4rem; } }
+
+/* ---- Bouton animé ---- */
+.vitrine__bouton--anime {
+  position: relative; overflow: hidden;
+  border-radius: 999px;
+  padding: 0.75rem 1.5rem;
+  transition: transform 0.2s, box-shadow 0.2s, background 0.2s;
+}
+.vitrine__bouton--anime::after {
+  content: "";
+  position: absolute; top: 0; left: -80%;
+  width: 50%; height: 100%;
+  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  transform: skewX(-20deg);
+  animation: bouton-reflet 3.5s ease-in-out infinite;
+}
+@keyframes bouton-reflet { 0%, 60% { left: -80%; } 100% { left: 150%; } }
+.vitrine__bouton--anime:hover { transform: translateY(-2px); box-shadow: 0 10px 22px color-mix(in srgb, var(--brass) 45%, transparent); }
+.vitrine__bouton--anime:active { transform: scale(0.96); }
+
+/* ---- Cartes tarifs ---- */
+.vitrine-plan--anime {
+  position: relative; height: 100%;
+  border-radius: 18px;
+  overflow: hidden;
+  transition: transform 0.3s cubic-bezier(.2,.8,.2,1), box-shadow 0.3s, border-color 0.3s;
+}
+.vitrine-plan--anime > * { position: relative; }
+.vitrine-plan--anime:hover { transform: translateY(-8px); box-shadow: 0 22px 44px rgba(14, 34, 51, 0.2); border-color: var(--brass); }
+.vitrine-plan--vedette {
+  border: 2px solid var(--brass);
+  box-shadow: 0 18px 40px color-mix(in srgb, var(--brass) 30%, transparent);
+  animation: vedette-respire 3.5s ease-in-out infinite;
+}
+@keyframes vedette-respire {
+  0%, 100% { box-shadow: 0 18px 40px color-mix(in srgb, var(--brass) 25%, transparent); }
+  50%      { box-shadow: 0 22px 54px color-mix(in srgb, var(--brass) 50%, transparent); }
+}
+.vitrine-plan__badge {
+  align-self: flex-start;
+  padding: 0.25rem 0.7rem;
+  margin-bottom: 0.4rem;
+  border-radius: 999px;
+  background: var(--brass); color: #fff;
+  font-size: 0.75rem; font-weight: 600;
+}
+.vitrine-plan .vitrine-plan__prix { font-family: "Fraunces", serif; font-size: 1.9rem; }
+.vitrine-plan p.vitrine-plan__avantage { display: flex; align-items: flex-start; gap: 0.4rem; margin: 0.4rem 0 1.25rem; }
+.vitrine-plan__avantage svg { color: var(--teal); flex: none; margin-top: 3px; }
+
+/* Respecte les préférences d'accessibilité */
+@media (prefers-reduced-motion: reduce) {
+  .fond-anime *, .feat-detail, .feat-detail *, .vitrine__titre--anime, .vitrine__intro--anime,
+  .vitrine__bouton--anime::after, .vitrine-plan--vedette, .feat-carte__icone {
+    animation: none !important;
+  }
+  .apparition { opacity: 1; transform: none; transition: none; }
+}

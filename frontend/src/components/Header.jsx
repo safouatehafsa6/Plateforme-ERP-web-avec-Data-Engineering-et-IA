@@ -16,7 +16,7 @@ export default function Header() {
 
   // Le Header ne montre pas "Connexion / Inscription" quand on est déjà
   // dans un espace connecté (ex: le tableau de bord).
-  const estEspacePublic = location.pathname === "/" || location.pathname === "/inscription";
+  const estEspacePublic = ["/", "/inscription", "/fonctionnalites", "/tarifs"].includes(location.pathname);
 
   return (
     <header className="app-header">
@@ -25,9 +25,9 @@ export default function Header() {
           BENJEDDOU ERP
         </Link>
         <nav className="app-header__nav app-header__nav--desktop">
-          <a href="#" className="app-header__lien">{t("nav_accueil")}</a>
-          <a href="#" className="app-header__lien">{t("nav_fonctionnalites")}</a>
-          <a href="#" className="app-header__lien">{t("nav_tarifs")}</a>
+          <Link to="/" className="app-header__lien" onClick={() => setMenuOuvert(false)}>{t("nav_accueil")}</Link>
+          <Link to="/fonctionnalites" className="app-header__lien" onClick={() => setMenuOuvert(false)}>{t("nav_fonctionnalites")}</Link>
+          <Link to="/tarifs" className="app-header__lien" onClick={() => setMenuOuvert(false)}>{t("nav_tarifs")}</Link>
         </nav>
       </div>
 
@@ -90,9 +90,9 @@ export default function Header() {
       {menuOuvert && (
         <div className="app-header__menu-mobile">
           <nav className="app-header__nav-mobile">
-            <a href="#" className="app-header__lien">{t("nav_accueil")}</a>
-            <a href="#" className="app-header__lien">{t("nav_fonctionnalites")}</a>
-            <a href="#" className="app-header__lien">{t("nav_tarifs")}</a>
+            <Link to="/" className="app-header__lien" onClick={() => setMenuOuvert(false)}>{t("nav_accueil")}</Link>
+            <Link to="/fonctionnalites" className="app-header__lien" onClick={() => setMenuOuvert(false)}>{t("nav_fonctionnalites")}</Link>
+            <Link to="/tarifs" className="app-header__lien" onClick={() => setMenuOuvert(false)}>{t("nav_tarifs")}</Link>
           </nav>
 
           <div className="app-header__themes">

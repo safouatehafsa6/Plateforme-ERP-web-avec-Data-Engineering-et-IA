@@ -4,6 +4,7 @@ import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { API_BASE_URL } from "../api/config";
 import DocumentsRag from "./DocumentsRag";
+import ChampSuggestions from "./ChampSuggestions";
 
 const LANGUES = [
   { code: "fr", label: "FR" },
@@ -83,7 +84,7 @@ export default function AssistantIA({ open, onClose }) {
       {messages.length <= 1 && <div className="assistant-panel__suggestions">{ui.suggestions.map((s)=><button key={s} type="button" onClick={()=>setInput(s)}>{s}</button>)}</div>}
     </div>
     <form className="assistant-panel__form" onSubmit={envoyer}>
-      <input value={input} onChange={e=>setInput(e.target.value)} placeholder={ui.placeholder} aria-label={ui.placeholder} />
+      <ChampSuggestions value={input} onChange={setInput} placeholder={ui.placeholder} ariaLabel={ui.placeholder} langue={langue} module={module} />
       <button type="submit" disabled={!input.trim() || sending} title={ui.send} aria-label={ui.send}><Send size={17}/></button>
     </form>
   </section>;

@@ -80,6 +80,7 @@ function DemandeForm({ produits, initial, onClose, onSaved }) {
     try {
       const body = { notes: notes || null, lignes: lignes.map((l) => ({ produitId: Number(l.produitId), quantite: Number(l.quantite), prixEstime: Number(l.prixEstime || 0) })) };
       await api("/demandes", { method: "POST", body: JSON.stringify(body) });
+      window.dispatchEvent(new Event("erp:notifications-refresh"));
       onSaved();
     } catch (e2) { setErreur(e2.message); } finally { setEnCours(false); }
   }
@@ -108,6 +109,7 @@ function BonCommandeForm({ fournisseurs, produits, demandeInitiale, onClose, onS
     try {
       const body = { fournisseurId: Number(fournisseurId), demandeId: demandeInitiale?.id || null, notes: notes || null, lignes: lignes.map((l) => ({ produitId: Number(l.produitId), quantite: Number(l.quantite), prixUnitaire: Number(l.prixUnitaire) })) };
       await api("/bons-commande", { method: "POST", body: JSON.stringify(body) });
+      window.dispatchEvent(new Event("erp:notifications-refresh"));
       onSaved();
     } catch (e2) { setErreur(e2.message); } finally { setEnCours(false); }
   }
@@ -135,6 +137,7 @@ function ReceptionForm({ commande, onClose, onSaved }) {
     e.preventDefault(); setEnCours(true); setErreur("");
     try {
       await api(`/bons-commande/${commande.id}/receptionner`, { method: "POST", body: JSON.stringify({ notes: notes || null, lignes: lignes.filter((l) => Number(l.quantite) > 0).map((l) => ({ produitId: l.produitId, quantite: Number(l.quantite) })) }) });
+      window.dispatchEvent(new Event("erp:notifications-refresh"));
       onSaved();
     } catch (e2) { setErreur(e2.message); } finally { setEnCours(false); }
   }
@@ -173,7 +176,7 @@ export default function Achats() {
 
   async function action(path, method = "POST", body) {
     setErreur("");
-    try { await api(path, { method, body: body ? JSON.stringify(body) : undefined }); await charger(); }
+    try { await api(path, { method, body: body ? JSON.stringify(body) : undefined }); window.dispatchEvent(new Event("erp:notifications-refresh")); await charger(); }
     catch (e) { setErreur(e.message); }
   }
 

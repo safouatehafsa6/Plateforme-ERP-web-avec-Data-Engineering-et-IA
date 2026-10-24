@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.db import get_pool_entreprise
 from app.security.permissions import exiger_permission
+from app.routers.notifications import notifier_action
 
 router = APIRouter(prefix="/api/achats", tags=["achats"])
 
@@ -152,6 +153,7 @@ def creer_demande(payload: DemandePayload, utilisateur=Depends(exiger_permission
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    notifier_action(utilisateur, "Demande d'achat créée", f"La demande d'achat {numero} a été créée avec succès.", "/achats")
     return {"id": did, "numero": numero, "message": "Demande d'achat créée."}
 
 
@@ -171,6 +173,7 @@ def statut_demande(demande_id: int, payload: StatutPayload, utilisateur=Depends(
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    notifier_action(utilisateur, "Demande d'achat mise à jour", f"Le statut de la demande d'achat a été changé en : {payload.statut}.", "/achats", "info")
     return {"message": "Statut de la demande mis à jour."}
 
 
@@ -226,6 +229,7 @@ def creer_bon_commande(payload: BonCommandePayload, utilisateur=Depends(exiger_p
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    notifier_action(utilisateur, "Bon de commande créé", f"Le bon de commande fournisseur {numero} a été créé avec succès.", "/achats")
     return {"id": aid, "numero": numero, "message": "Bon de commande fournisseur créé."}
 
 
@@ -246,6 +250,7 @@ def statut_bon_commande(achat_id: int, payload: StatutPayload, utilisateur=Depen
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    notifier_action(utilisateur, "Bon de commande mis à jour", f"Le statut du bon de commande a été changé en : {payload.statut}.", "/achats", "info")
     return {"message": "Statut du bon de commande mis à jour."}
 
 
@@ -275,6 +280,7 @@ def convertir_demande(demande_id: int, fournisseur_id: int, utilisateur=Depends(
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    notifier_action(utilisateur, "Demande convertie", f"La demande d'achat a été convertie en bon de commande {numero}.", "/achats")
     return {"id": aid, "numero": numero, "message": "Demande convertie en bon de commande."}
 
 
@@ -328,6 +334,7 @@ def receptionner(achat_id: int, payload: ReceptionPayload, utilisateur=Depends(e
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    notifier_action(utilisateur, "Réception enregistrée", f"La réception {numero} a été enregistrée et le stock a été mis à jour.", "/achats")
     return {"id": rid, "numero": numero, "message": "Réception enregistrée et stock mis à jour."}
 
 

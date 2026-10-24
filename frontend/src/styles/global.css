@@ -1970,3 +1970,169 @@ a {
   }
   .apparition { opacity: 1; transform: none; transition: none; }
 }
+
+/* ======================================================================
+   Boutons flottants (menu d'aide, notifications, assistant IA)
+   Position : extrême droite en français/anglais (LTR), extrême gauche en
+   arabe (RTL). Le conteneur reçoit la classe --rtl selon la langue du site.
+   ====================================================================== */
+.boutons-flottants {
+  position: fixed;
+  right: 22px; left: auto;
+  bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+}
+.boutons-flottants--rtl { right: auto; left: 22px; }
+/* Chaque élément se range du côté « fin » de la langue (droite en LTR, gauche en RTL). */
+.boutons-flottants > * { margin-inline-start: auto; }
+
+.boutons-flottants__principal {
+  position: relative;
+  width: 58px; height: 58px;
+  border: 0; border-radius: 50%;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--brass), var(--brass-dark));
+  color: #fff;
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgba(14, 34, 51, 0.32);
+  transition: transform 0.2s cubic-bezier(.2,.8,.2,1), box-shadow 0.2s;
+}
+.boutons-flottants__principal:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 14px 30px rgba(14, 34, 51, 0.38); }
+.boutons-flottants__principal:active { transform: scale(0.94); }
+.boutons-flottants__principal:focus-visible { outline: 3px solid color-mix(in srgb, var(--brass) 55%, #fff); outline-offset: 3px; }
+.boutons-flottants__principal.est-ouvert { background: var(--ink); }
+.boutons-flottants__chevron { display: none; }
+.boutons-flottants__principal-badge {
+  position: absolute; top: -5px; inset-inline-end: -5px;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  display: grid; place-items: center;
+  border-radius: 999px;
+  background: #c0392b; color: #fff;
+  font-size: 0.72rem; font-weight: 700;
+  border: 2px solid var(--paper);
+  animation: fab-pulse 2.2s ease-out infinite;
+}
+@keyframes fab-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0.55); }
+  70%  { box-shadow: 0 0 0 10px rgba(192, 57, 43, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(192, 57, 43, 0); }
+}
+
+.boutons-flottants__menu {
+  width: min(330px, calc(100vw - 32px));
+  max-height: min(70vh, 540px);
+  overflow-y: auto;
+  padding: 0.5rem;
+  background: var(--carte-fond);
+  color: var(--text-dark);
+  border: 1px solid var(--paper-line);
+  border-radius: 16px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.26);
+  transform-origin: bottom right;
+  animation: fab-menu-entree 0.22s cubic-bezier(.2,.8,.2,1) both;
+}
+.boutons-flottants--rtl .boutons-flottants__menu { transform-origin: bottom left; }
+@keyframes fab-menu-entree { from { opacity: 0; transform: translateY(12px) scale(0.96); } to { opacity: 1; transform: none; } }
+
+.boutons-flottants__menu-titre {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  padding: 0.35rem 0.4rem 0.6rem;
+  font-weight: 700; font-size: 0.95rem;
+}
+.boutons-flottants__menu-titre span { flex: 1; }
+.boutons-flottants__menu-titre button {
+  display: grid; place-items: center; width: 30px; height: 30px;
+  border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer;
+}
+.boutons-flottants__menu-titre button:hover { background: color-mix(in srgb, var(--brass) 16%, transparent); }
+
+.boutons-flottants__item {
+  position: relative;
+  display: flex; align-items: center; gap: 0.75rem;
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 0; border-radius: 12px;
+  background: transparent; color: var(--text-dark);
+  font: inherit; font-size: 0.92rem; font-weight: 600;
+  text-align: start; text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.15s;
+}
+.boutons-flottants__item svg { flex: none; color: var(--brass-dark); }
+.boutons-flottants__item:hover { background: color-mix(in srgb, var(--brass) 14%, transparent); transform: translateX(2px); }
+.boutons-flottants--rtl .boutons-flottants__item:hover { transform: translateX(-2px); }
+.boutons-flottants__item:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+.boutons-flottants__badge {
+  margin-inline-start: auto;
+  min-width: 22px; height: 22px; padding: 0 6px;
+  display: grid; place-items: center;
+  border-radius: 999px; background: #c0392b; color: #fff;
+  font-size: 0.72rem; font-weight: 700;
+}
+.boutons-flottants__note { margin: 0.4rem 0.6rem; font-size: 0.82rem; color: var(--text-muted); display: flex; align-items: center; gap: 0.4rem; }
+.boutons-flottants__erreur { margin: 0.4rem 0.6rem; font-size: 0.82rem; color: #c0392b; }
+.boutons-flottants__spinner { animation: fab-tourne 0.9s linear infinite; }
+@keyframes fab-tourne { to { transform: rotate(360deg); } }
+
+/* Liste des notifications */
+.boutons-flottants__notifications { display: flex; flex-direction: column; gap: 0.3rem; }
+.boutons-flottants__tout-lire {
+  display: inline-flex; align-items: center; gap: 0.4rem; align-self: flex-start;
+  padding: 0.35rem 0.6rem; border: 1px solid var(--paper-line); border-radius: 999px;
+  background: transparent; color: var(--text-dark); font-size: 0.78rem; cursor: pointer;
+}
+.boutons-flottants__tout-lire:hover { border-color: var(--brass); }
+.boutons-flottants__notification {
+  display: flex; align-items: stretch; gap: 0.2rem;
+  border-radius: 12px; border: 1px solid transparent;
+}
+.boutons-flottants__notification.est-non-lue {
+  background: color-mix(in srgb, var(--brass) 11%, transparent);
+  border-color: color-mix(in srgb, var(--brass) 30%, transparent);
+}
+.boutons-flottants__notification-contenu {
+  flex: 1; display: flex; gap: 0.6rem; align-items: flex-start;
+  padding: 0.6rem 0.65rem; border: 0; background: transparent; color: inherit;
+  font: inherit; text-align: start; cursor: pointer; border-radius: 12px;
+}
+.boutons-flottants__notification-contenu:hover { background: color-mix(in srgb, var(--brass) 8%, transparent); }
+.boutons-flottants__notification-texte { display: flex; flex-direction: column; gap: 0.15rem; font-size: 0.82rem; line-height: 1.4; }
+.boutons-flottants__notification-texte strong { font-size: 0.86rem; }
+.boutons-flottants__notification.est-lue .boutons-flottants__notification-texte { opacity: 0.7; }
+.boutons-flottants__notification-texte small { color: var(--text-muted); font-size: 0.72rem; }
+.boutons-flottants__notification-point { flex: none; width: 10px; height: 10px; margin-top: 0.3rem; border-radius: 50%; background: var(--teal); }
+.boutons-flottants__notification-point.categorie-success { background: #2e8b57; }
+.boutons-flottants__notification-point.categorie-warning { background: #d68910; }
+.boutons-flottants__notification-point.categorie-error { background: #c0392b; }
+.boutons-flottants__notification-lire {
+  align-self: center; display: grid; place-items: center; width: 30px; height: 30px; margin-inline-end: 0.3rem;
+  border: 0; border-radius: 8px; background: transparent; color: var(--teal); cursor: pointer;
+}
+.boutons-flottants__notification-lire:hover { background: color-mix(in srgb, var(--teal) 16%, transparent); }
+
+/* Assistant IA ouvert depuis le bouton flottant : fixé près du bouton, côté de la langue du site */
+.boutons-flottants .assistant-panel {
+  position: fixed;
+  right: 22px; left: auto;
+  bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  width: min(390px, calc(100vw - 32px));
+  height: min(570px, calc(100vh - 120px));
+  z-index: 1090;
+}
+.boutons-flottants--rtl .assistant-panel { right: auto; left: 22px; }
+
+@media (max-width: 480px) {
+  .boutons-flottants { right: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .boutons-flottants--rtl { right: auto; left: 14px; }
+  .boutons-flottants .assistant-panel { right: 14px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); height: calc(100vh - 110px); }
+  .boutons-flottants--rtl .assistant-panel { right: auto; left: 14px; }
+}
+@media print { .boutons-flottants { display: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .boutons-flottants__principal-badge, .boutons-flottants__menu, .boutons-flottants__spinner { animation: none !important; }
+  .boutons-flottants__principal, .boutons-flottants__item { transition: none; }
+}

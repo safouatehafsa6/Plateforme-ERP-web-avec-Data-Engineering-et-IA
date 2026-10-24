@@ -83,6 +83,7 @@ function DocumentForm({ type, clients, produits, initial, onClose, onSaved }) {
       if (type === "devis") body.dateValidite = dateValidite || null;
       const path = initial ? `/devis/${initial.id}` : type === "devis" ? "/devis" : "/commandes";
       await api(path, { method: initial ? "PUT" : "POST", body: JSON.stringify(body) });
+      window.dispatchEvent(new Event("erp:notifications-refresh"));
       onSaved();
     } catch (e2) { setErreur(e2.message); } finally { setEnCours(false); }
   }
@@ -122,7 +123,7 @@ export default function Ventes() {
 
   async function action(path, method = "POST", body) {
     setErreur("");
-    try { await api(path, { method, body: body ? JSON.stringify(body) : undefined }); await charger(); }
+    try { await api(path, { method, body: body ? JSON.stringify(body) : undefined }); window.dispatchEvent(new Event("erp:notifications-refresh")); await charger(); }
     catch (e) { setErreur(e.message); }
   }
 

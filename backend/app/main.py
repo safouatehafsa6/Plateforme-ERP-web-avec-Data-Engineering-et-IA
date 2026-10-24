@@ -3,7 +3,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, suggestions
+from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, suggestions, notifications
 
 app = FastAPI(title="ERP Backend", version="0.1.0")
 
@@ -34,6 +34,19 @@ app.include_router(assistant.router)
 app.include_router(assistant_documents.router)
 app.include_router(pipeline.router)
 app.include_router(suggestions.router)
+app.include_router(notifications.router)
+
+
+@app.on_event("startup")
+def preparer_notifications():
+    """Crée la table des notifications sur une base existante (voir notifications.py)."""
+    try:
+        notifications.assurer_table()
+    except Exception:
+        import logging
+        logging.getLogger("erp.notifications").exception(
+            "Table des notifications non créée au démarrage (nouvel essai à la première utilisation)"
+        )
 
 
 @app.get("/api/health")

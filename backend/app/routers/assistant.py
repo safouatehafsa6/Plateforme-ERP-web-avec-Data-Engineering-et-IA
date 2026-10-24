@@ -1474,6 +1474,61 @@ def _new_client_created(lang, nom):
     return f"Le client « {nom} » a été créé et sélectionné."
 
 
+def _est_conversation(message):
+    """Vrai si le message est de la conversation courante (salutation, remerciement,
+    refus poli, « ok »…) et non une recherche d'information. Dans ce cas on ne
+    cherche pas dans les documents. En cas de doute ou d'erreur : faux (on cherche)."""
+    texte = (message or "").strip()
+    if not texte or len(texte) > 60:
+        return False
+    try:
+        from app.services import llm_client
+        reponse = llm_client.chat_completion(
+            [
+                {"role": "system", "content": (
+                    "Classe le message de l'utilisateur d'un assistant ERP. "
+                    "Réponds par un seul mot : CHAT ou QUESTION. "
+                    "CHAT = salutation, remerciement, au revoir, refus poli (« non merci », "
+                    "« I don't want anything »), « ok », politesse ou bavardage, dans n'importe quelle langue. "
+                    "QUESTION = demande d'information, de définition, de nom, de chiffre, de liste, "
+                    "ou simple terme/nom (ex. « CALMS », « Git », « le professeur ») : "
+                    "dès qu'il y a un doute, réponds QUESTION."
+                )},
+                {"role": "user", "content": texte},
+            ],
+            temperature=0,
+        )
+    except Exception:
+        return False
+    return (reponse or "").strip().upper().startswith("CHAT")
+
+
+def _termes_de_recherche(question):
+    """Mots-clés, synonymes et abréviations proposés par le LLM pour élargir la
+    recherche (ex. « professeur » -> « pr prof enseignant »). Jamais bloquant :
+    en cas d'erreur ou de question très courte, retourne une chaîne vide."""
+    if len((question or "").strip()) < 8:
+        return ""
+    try:
+        from app.services import llm_client
+        texte = llm_client.chat_completion(
+            [
+                {"role": "system", "content": (
+                    "Tu aides un moteur de recherche dans des documents. Donne 6 à 8 mots-clés, "
+                    "synonymes et abréviations utiles pour retrouver la réponse à la question "
+                    "(exemple : professeur -> pr prof enseignant). "
+                    "Écris-les en français ET dans la langue de la question (les documents sont souvent en français). "
+                    "Réponds sur une seule ligne, uniquement les mots séparés par des espaces, sans phrase."
+                )},
+                {"role": "user", "content": question.strip()[:300]},
+            ],
+            temperature=0,
+        )
+    except Exception:
+        return ""
+    return " ".join((texte or "").replace(",", " ").split())[:200]
+
+
 def _rechercher_chunks_rag(utilisateur, question, limite=5):
     """Recherche RAG locale, isolée par base entreprise et filtrée par permissions."""
     if utilisateur.get("type") != "interne" or not utilisateur.get("nomBase"):
@@ -1556,9 +1611,13 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
     finally:
         pool.putconn(conn)
 
-    query_vector = embed_texts([question], query=True)[0]
+    termes_etendus = _termes_de_recherche(question)
+    query_vector = embed_texts(
+        [f"{question} {termes_etendus}".strip()], query=True
+    )[0]
     autorise = {}
     scored = []
+    proches = []  # passages un peu moins proches : servent à compléter si peu de résultats
 
     # Recherche hybride : similarité sémantique + correspondance lexicale.
     # La partie lexicale aide à privilégier les passages contenant les termes
@@ -1583,6 +1642,21 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
         "and", "for", "are", "was", "les", "der", "die", "und",
     }
     question_terms -= stop_words
+    termes_etendus_set = _normaliser_termes(termes_etendus) - stop_words
+
+    # Mots trop répandus (ex. « Pr. » dans l'en-tête de toutes les pages d'un PDF) :
+    # ils ne distinguent aucun passage, on les écarte des mots-clés étendus.
+    termes_par_chunk = {}
+    if termes_etendus_set:
+        for row in rows:
+            termes_par_chunk[row[0]] = _normaliser_termes(
+                " ".join([str(row[1] or ""), str(row[4] or "")])
+            )
+        total_chunks = max(1, len(termes_par_chunk))
+        termes_etendus_set = {
+            terme for terme in termes_etendus_set
+            if sum(1 for termes in termes_par_chunk.values() if terme in termes) / total_chunks <= 0.3
+        }
 
     for (
         chunk_id, titre, source, module, contenu,
@@ -1599,10 +1673,14 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
                 continue
 
         semantic_score = cosine_similarity(query_vector, embedding)
-        chunk_terms = _normaliser_termes(" ".join([
+        chunk_terms = termes_par_chunk.get(chunk_id) or _normaliser_termes(" ".join([
             str(titre or ""), str(contenu or "")
         ]))
         overlap = len(question_terms & chunk_terms) / max(1, len(question_terms))
+        # Un synonyme ou une abréviation proposé par le LLM présent dans le passage
+        # compte comme une correspondance lexicale partielle.
+        if termes_etendus_set & chunk_terms:
+            overlap = max(overlap, 0.25)
         # La similarité sémantique reste majoritaire ; le lexical sert au reranking.
         combined_score = (0.78 * semantic_score) + (0.22 * overlap)
         # Un passage doit avoir une similarité minimale ou une forte correspondance
@@ -1612,8 +1690,19 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
                 combined_score, semantic_score, overlap, chunk_id,
                 titre, source, module, contenu, document_id,
             ))
+        elif semantic_score >= 0.32:
+            proches.append((
+                combined_score, semantic_score, overlap, chunk_id,
+                titre, source, module, contenu, document_id,
+            ))
 
     scored.sort(key=lambda item: (item[0], item[1], item[3]), reverse=True)
+    n_surs = len(scored)
+    # Peu de passages sûrs : on ajoute quelques passages proches. Le LLM écarte
+    # ceux qui ne répondent pas (marqueur NON_TROUVE si aucun ne convient).
+    if len(scored) < 3 and len(question.strip()) >= 8:
+        proches.sort(key=lambda item: (item[0], item[1], item[3]), reverse=True)
+        scored = scored + proches[: 4 - len(scored)]
     result = []
     par_document = {}
 
@@ -1655,6 +1744,7 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
             "source": source or "Document interne",
             "module": module,
             "excerpt": excerpt,
+            "context": (contenu or "").strip()[:1200],
             "score": round(float(score), 4),
             "semanticScore": round(float(semantic_score), 4),
             "lexicalScore": round(float(lexical_score), 4),
@@ -1662,6 +1752,68 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
 
         if len(result) >= limite:
             break
+
+    # Début de document : la page de titre porte souvent l'auteur, le professeur,
+    # le titre ou la date, mais ressemble rarement à la question posée. On ajoute donc
+    # le premier passage des documents les mieux classés (2 au maximum).
+    if result:
+        premiers = {}
+        for row in rows:
+            if row[5] is not None and (row[5] not in premiers or row[0] < premiers[row[5]][0]):
+                premiers[row[5]] = row
+        deja = {item["id"] for item in result}
+        ajoutes = 0
+        for item in list(result):
+            if ajoutes >= 2:
+                break
+            row = premiers.get(item["documentId"])
+            if not row or row[0] in deja:
+                continue
+            module_p = row[3] or "documents"
+            if module_p not in MODULES and module_p != "documents":
+                continue
+            if module_p not in autorise:
+                if module_p == "documents":
+                    autorise[module_p] = utilisateur.get("type") == "interne"
+                else:
+                    autorise[module_p] = _has_permission(utilisateur, module_p, "consulter")
+            if not autorise[module_p]:
+                continue
+            contenu_p = (row[4] or "").strip()
+            extrait_p = contenu_p
+            if len(extrait_p) > 280:
+                extrait_p = extrait_p[:280].rsplit(" ", 1)[0] + "…"
+            result.append({
+                "id": row[0],
+                "documentId": row[5],
+                "title": row[1] or "Document sans titre",
+                "source": row[2] or "Document interne",
+                "module": module_p,
+                "excerpt": extrait_p,
+                "context": contenu_p[:1200],
+                "score": 0.0,
+                "semanticScore": 0.0,
+                "lexicalScore": 0.0,
+            })
+            deja.add(row[0])
+            ajoutes += 1
+
+    # Diagnostic (activé avec RAG_DEBUG=1 dans le .env) : permet de voir pourquoi
+    # un passage est retrouvé ou non. Aucun effet sinon.
+    import os
+    if os.getenv("RAG_DEBUG") == "1":
+        import logging
+        journal = logging.getLogger("erp.rag.debug")
+        journal.warning(
+            "RAG question=%r termes_etendus=%r passages_surs=%d retenus=%d",
+            question, termes_etendus, n_surs, len(result),
+        )
+        for rang, item in enumerate(result, 1):
+            journal.warning(
+                "RAG  #%d score=%.3f sem=%.3f lex=%.2f | %s | %s",
+                rang, item["score"], item["semanticScore"], item["lexicalScore"],
+                item["source"], (item.get("context") or "")[:90].replace("\n", " "),
+            )
 
     return result
 
@@ -2246,7 +2398,10 @@ def chat(
     rag_error = False
 
     try:
-        sources = _rechercher_chunks_rag(utilisateur, payload.message)
+        # Conversation courante : pas de recherche documentaire (évite de résumer
+        # un document en réponse à « merci » ou « non merci »).
+        if not _est_conversation(payload.message):
+            sources = _rechercher_chunks_rag(utilisateur, payload.message)
     except RuntimeError:
         import logging
         logging.getLogger("erp.rag").exception(
@@ -2278,7 +2433,12 @@ def chat(
             if reponse_generee:
                 import re as _re
                 # Le modèle écrit parfois le marqueur sans crochets (NON_TROUVE, NON TROUVÉ…).
-                if _re.search(r"NON[_ \-]?TROUV", reponse_generee, _re.IGNORECASE):
+                # Une étiquette entre crochets en tête de réponse ([MERCI], [MONTRE]…) est
+                # aussi un signe que le modèle n'a pas su répondre à partir des passages.
+                if (
+                    _re.search(r"NON[_ \-]?TROUV", reponse_generee, _re.IGNORECASE)
+                    or _re.match(r"\s*\[[A-ZÀ-ÝÉÈ_ ]{2,20}\]", reponse_generee)
+                ):
                     # Les passages ne répondent pas à la question : on retire les
                     # sources hors sujet et on laisse la suite (données ERP, puis
                     # réponse générale du LLM : salutation, remerciement, ou
@@ -2332,6 +2492,12 @@ def chat(
 
     if not answer or not str(answer).strip():
         answer = _guide(payload.langue, payload.module)
+
+    # Le passage complet ne sert qu'au LLM : le navigateur reçoit l'extrait court.
+    sources = [
+        {cle: valeur for cle, valeur in item.items() if cle != "context"}
+        for item in sources
+    ]
 
     return {
         "reply": answer,

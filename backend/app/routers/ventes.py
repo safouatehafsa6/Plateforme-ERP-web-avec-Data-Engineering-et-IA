@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import logging
 from decimal import Decimal, ROUND_HALF_UP
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -6,6 +7,22 @@ from pydantic import BaseModel, Field
 
 from app.db import get_pool_entreprise
 from app.security.permissions import exiger_permission
+from app.routers.notifications import creer_notification
+
+logger = logging.getLogger(__name__)
+
+
+def _notifier_action(utilisateur, titre: str, message: str, lien: str, categorie: str = "success"):
+    try:
+        creer_notification(
+            type_compte=str(utilisateur.get("type") or "interne"),
+            utilisateur_id=str(utilisateur.get("id") or ""),
+            entreprise_id=int(utilisateur["entrepriseId"]) if utilisateur.get("entrepriseId") is not None else None,
+            titre=titre, message=message, lien=lien, categorie=categorie,
+        )
+    except Exception:
+        # Une panne du système de notifications ne doit pas annuler une opération métier déjà validée.
+        logger.exception("Impossible de créer la notification utilisateur")
 
 router = APIRouter(prefix="/api/ventes", tags=["ventes"])
 
@@ -152,6 +169,7 @@ def creer_devis(payload: DevisPayload, utilisateur=Depends(exiger_permission("ve
         raise
     finally:
         pool.putconn(conn)
+    _notifier_action(utilisateur, "Devis créé", f"Le devis {numero} a été créé avec succès.", "/ventes", "success")
     return {"id": doc_id, "numero": numero, "message": "Devis créé."}
 
 
@@ -228,6 +246,7 @@ def convertir_devis(devis_id: int, utilisateur=Depends(exiger_permission("ventes
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    _notifier_action(utilisateur, "Commande créée", f"Le devis a été converti en commande {numero}.", "/ventes", "success")
     return {"id": commande_id, "numero": numero, "message": "Devis converti en commande."}
 
 
@@ -264,6 +283,7 @@ def creer_commande(payload: DocumentPayload, utilisateur=Depends(exiger_permissi
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    _notifier_action(utilisateur, "Commande créée", f"La commande {numero} a été créée avec succès.", "/ventes")
     return {"id": cid, "numero": numero, "message": "Commande créée."}
 
 
@@ -330,6 +350,7 @@ def facturer_commande(commande_id: int, utilisateur=Depends(exiger_permission("f
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    _notifier_action(utilisateur, "Facture créée", f"La facture {numero} a été créée avec succès.", "/facturation")
     return {"id": fid, "numero": numero, "message": "Facture créée."}
 
 
@@ -364,4 +385,5 @@ def statut_facture(facture_id: int, payload: StatutPayload, utilisateur=Depends(
     except Exception:
         conn.rollback(); raise
     finally: pool.putconn(conn)
+    _notifier_action(utilisateur, "Facture mise à jour", f"Le statut de la facture a été changé en : {payload.statut}.", "/facturation", "info")
     return {"message": "Statut de facture mis à jour."}

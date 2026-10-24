@@ -115,6 +115,11 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    environment:
+      # Contact affiché dans les boutons flottants (laisser vide pour masquer le bouton).
+      # À définir dans le fichier .env à la racine du projet.
+      VITE_WHATSAPP_NUMBER: ${VITE_WHATSAPP_NUMBER:-}
+      VITE_SUPPORT_EMAIL: ${VITE_SUPPORT_EMAIL:-}
     ports:
       - "3000:3000"
     networks:

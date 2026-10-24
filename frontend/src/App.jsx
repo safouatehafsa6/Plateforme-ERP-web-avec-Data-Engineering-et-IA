@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { LangueProvider } from "./context/LangueContext";
 import { ThemeProvider } from "./context/ThemeContext";
 import Header from "./components/Header";
+import BoutonsFlottants from "./components/BoutonsFlottants";
 import Connexion from "./pages/Connexion";
 import Inscription from "./pages/Inscription";
 import MotDePasseOublie from "./pages/MotDePasseOublie";
@@ -58,6 +59,9 @@ export default function App() {
             <Route path="/portail" element={<PortailAccueil />} />
             <Route path="/verifier/:nomBase/:code" element={<VerificationDocument />} />
           </Routes>
+          {/* Boutons flottants : rendus ici (dans le routeur et le contexte de langue)
+              pour apparaître sur toutes les pages, publiques et privées. */}
+          <BoutonsFlottants />
         </LangueProvider>
       </ThemeProvider>
     </BrowserRouter>

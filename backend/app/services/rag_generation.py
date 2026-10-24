@@ -16,11 +16,20 @@ SYSTEM_PROMPT = (
     "choisis celui dont le nom correspond exactement au terme de la question "
     "(un code de validation n'est pas un code de vérification). "
     "Le titre et le nom de chaque document sont aussi des informations utilisables : "
-    "si la question porte sur le nom, le titre, le sujet ou le thème d'un document ou d'un cours, "
-    "réponds à partir des titres et des extraits des sources, en écrivant le nom proprement "
+    "si la question porte sur le NOM ou le titre d'un document ou d'un cours, "
+    "réponds à partir des titres des sources, en écrivant le nom proprement "
     "(sans extension de fichier, avec des espaces à la place des tirets bas). "
+    "Si la question porte sur le SUJET, le thème ou le contenu d'un document, "
+    "résume ce que disent les extraits (titre figurant dans le texte, objectif, idées principales) "
+    "au lieu de répéter le nom du fichier. "
+    "Ne traduis et ne translittère JAMAIS les noms propres (personnes, entreprises, produits), les codes ni les sigles : "
+    "recopie-les exactement comme ils sont écrits dans le document, même si ta réponse est en arabe ou en anglais "
+    "(exemple : écris « Pr. Noussair FIKRI », jamais une version arabisée). "
+    "Comprends les abréviations courantes : Pr = Professeur, Dr = Docteur, M. = Monsieur, Mme = Madame. "
+    "Un nom précédé de « Pr. » dans l'en-tête ou la page de titre est celui du professeur ou de l'auteur du cours. "
     "Si la question est vague, indique les documents qui semblent concernés. "
-    "Ignore les passages sans rapport avec la question. "
+    "Ignore les passages sans rapport avec la question ; lis-les tous, car le plus pertinent n'est pas toujours le premier. "
+    "Si la réponse est une liste (outils, étapes, commandes), donne la liste complète trouvée dans les passages. "
     "Cite la source utilisée avec son titre. "
     "Si ni les titres ni les extraits ne permettent de répondre, commence ta réponse par [NON_TROUVE] "
     "puis dis que l'information n'a pas été trouvée dans les documents disponibles. "
@@ -41,7 +50,7 @@ def generer_reponse(question: str, sources: list[dict], langue: str) -> str | No
         return None
     langue_nom = {"fr": "français", "en": "English", "ar": "العربية"}.get(langue, "français")
     context = "\n\n".join(
-        f"Source: {_titre_lisible(item.get('title'))} — {_titre_lisible(item.get('source'))}\nExtrait: {item.get('excerpt')}"
+        f"Source: {_titre_lisible(item.get('title'))} — {_titre_lisible(item.get('source'))}\nExtrait: {item.get('context') or item.get('excerpt')}"
         for item in sources
     )
     messages = [

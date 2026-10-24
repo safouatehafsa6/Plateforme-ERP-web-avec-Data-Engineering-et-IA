@@ -1374,18 +1374,23 @@ def _is_documentary_question(message):
     """Détecte les questions qui nécessitent une information documentaire interne."""
     import unicodedata
 
-    text = (message or "").lower().replace("’", "'")
-    text = "".join(
-        char for char in unicodedata.normalize("NFKD", text)
-        if not unicodedata.combining(char)
-    )
-    text = " ".join(text.split())
+    def _norm(valeur):
+        valeur = (valeur or "").lower().replace("’", "'").replace("'", " ")
+        valeur = "".join(
+            char for char in unicodedata.normalize("NFKD", valeur)
+            if not unicodedata.combining(char)
+        )
+        return " ".join(valeur.split())
+
+    text = _norm(message)
 
     document_terms = (
         # Français
         "siege social", "adresse du siege", "adresse de l'entreprise",
         "adresse de la societe", "coordonnees de l'entreprise",
         "histoire de l'entreprise", "politique de l'entreprise",
+        "nom de l'entreprise", "nom de la societe", "nom de la compagnie",
+        "code de validation", "delai de livraison",
         "procedure interne", "procedures internes",
         "reglement interieur", "conditions de travail",
         "conges", "horaires de travail", "document interne",
@@ -1393,17 +1398,17 @@ def _is_documentary_question(message):
         "dans les documents", "dans la documentation",
         "que dit le document", "quelle est la politique",
         # English
-        "headquarters", "company address", "company policy",
+        "headquarters", "company address", "company policy", "company name",
         "internal procedure", "internal procedures",
         "according to the document", "in the company documents",
         "working hours", "leave policy",
         # العربية
-        "المقر الرئيسي", "عنوان الشركة", "عنوان المؤسسة",
+        "المقر الرئيسي", "عنوان الشركة", "عنوان المؤسسة", "اسم الشركة", "اسم المؤسسة",
         "سياسة الشركة", "الإجراءات الداخلية", "الوثائق الداخلية",
         "حسب الوثيقة", "حسب المستند", "ساعات العمل",
     )
 
-    return any(term in text for term in document_terms)
+    return any(_norm(term) in text for term in document_terms)
 
 
 def _document_not_found(langue):
@@ -1555,6 +1560,30 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
     autorise = {}
     scored = []
 
+    # Recherche hybride : similarité sémantique + correspondance lexicale.
+    # La partie lexicale aide à privilégier les passages contenant les termes
+    # précis de la question (codes, noms, délais), sans abandonner les synonymes.
+    import re
+    import unicodedata
+
+    def _normaliser_termes(value):
+        value = (value or "").lower().replace("’", "'").replace("_", " ")
+        value = "".join(
+            c for c in unicodedata.normalize("NFKD", value)
+            if not unicodedata.combining(c)
+        )
+        return set(re.findall(r"[\w-]{2,}", value, flags=re.UNICODE))
+
+    question_terms = _normaliser_termes(question)
+    stop_words = {
+        "quel", "quelle", "quels", "quelles", "comment", "pourquoi",
+        "est", "sont", "les", "des", "une", "un", "dans", "pour",
+        "avec", "sur", "par", "que", "qui", "quoi", "the", "what",
+        "which", "where", "when", "does", "this", "that", "from",
+        "and", "for", "are", "was", "les", "der", "die", "und",
+    }
+    question_terms -= stop_words
+
     for (
         chunk_id, titre, source, module, contenu,
         document_id, embedding, embedding_model,
@@ -1566,22 +1595,29 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
             try:
                 import json
                 embedding = json.loads(embedding)
-            except ValueError:
+            except (ValueError, TypeError):
                 continue
 
-        score = cosine_similarity(query_vector, embedding)
-        if score >= 0.35:
-            scored.append(
-                (
-                    score, chunk_id, titre, source,
-                    module, contenu, document_id,
-                )
-            )
+        semantic_score = cosine_similarity(query_vector, embedding)
+        chunk_terms = _normaliser_termes(" ".join([
+            str(titre or ""), str(contenu or "")
+        ]))
+        overlap = len(question_terms & chunk_terms) / max(1, len(question_terms))
+        # La similarité sémantique reste majoritaire ; le lexical sert au reranking.
+        combined_score = (0.78 * semantic_score) + (0.22 * overlap)
+        # Un passage doit avoir une similarité minimale ou une forte correspondance
+        # lexicale. Le seuil combiné évite d'afficher systématiquement 5 résultats.
+        if semantic_score >= 0.42 or (overlap >= 0.5 and semantic_score >= 0.28):
+            scored.append((
+                combined_score, semantic_score, overlap, chunk_id,
+                titre, source, module, contenu, document_id,
+            ))
 
-    scored.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    scored.sort(key=lambda item: (item[0], item[1], item[3]), reverse=True)
     result = []
+    par_document = {}
 
-    for score, chunk_id, titre, source, module, contenu, document_id in scored:
+    for score, semantic_score, lexical_score, chunk_id, titre, source, module, contenu, document_id in scored:
         module = module or "documents"
 
         if module not in MODULES and module != "documents":
@@ -1600,9 +1636,17 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
         if not autorise[module]:
             continue
 
+        # Au plus 2 passages par document : évite qu'un seul document occupe
+        # toutes les places et masque les autres documents pertinents.
+        if par_document.get(document_id, 0) >= 2:
+            continue
+        par_document[document_id] = par_document.get(document_id, 0) + 1
+
+        # Les sources visibles et le contexte LLM restent courts : le document
+        # complet reste stocké et n'est jamais renvoyé comme réponse.
         excerpt = (contenu or "").strip()
-        if len(excerpt) > 900:
-            excerpt = excerpt[:900].rsplit(" ", 1)[0] + "…"
+        if len(excerpt) > 280:
+            excerpt = excerpt[:280].rsplit(" ", 1)[0] + "…"
 
         result.append({
             "id": chunk_id,
@@ -1612,6 +1656,8 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
             "module": module,
             "excerpt": excerpt,
             "score": round(float(score), 4),
+            "semanticScore": round(float(semantic_score), 4),
+            "lexicalScore": round(float(lexical_score), 4),
         })
 
         if len(result) >= limite:
@@ -1621,23 +1667,8 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
 
 
 def _reponse_rag(sources, langue):
-    if not sources:
-        return None
-
-    if langue == "en":
-        intro = "I found these relevant passages in your company's documents:"
-    elif langue == "ar":
-        intro = "وجدت هذه المقاطع ذات الصلة في وثائق شركتك:"
-    else:
-        intro = (
-            "J’ai trouvé ces passages pertinents dans les documents "
-            "de votre entreprise :"
-        )
-
-    return intro + "\n\n" + "\n\n".join(
-        f"[{i}] {item['title']} — {item['excerpt']}"
-        for i, item in enumerate(sources, 1)
-    )
+    from app.services.rag_response import reponse_rag_concise
+    return reponse_rag_concise(sources, langue)
 
 
 @router.post("/chat")
@@ -2245,7 +2276,17 @@ def chat(
                 payload.message, sources, payload.langue
             )
             if reponse_generee:
-                answer = reponse_generee
+                import re as _re
+                # Le modèle écrit parfois le marqueur sans crochets (NON_TROUVE, NON TROUVÉ…).
+                if _re.search(r"NON[_ \-]?TROUV", reponse_generee, _re.IGNORECASE):
+                    # Les passages ne répondent pas à la question : on retire les
+                    # sources hors sujet et on laisse la suite (données ERP, puis
+                    # réponse générale du LLM : salutation, remerciement, ou
+                    # « information non trouvée ») formuler la réponse.
+                    sources = []
+                    answer = None
+                else:
+                    answer = reponse_generee
         except Exception:
             import logging
             logging.getLogger("erp.rag").exception(
@@ -2266,11 +2307,31 @@ def chat(
 
     # Ne pas afficher le guide générique lorsqu'une question documentaire
     # n'a pas de réponse dans les documents récupérés.
+    # Aucun passage pertinent ni donnée ERP : on laisse le LLM répondre
+    # naturellement (salutation, conversation, question hors documents) en lui
+    # interdisant d'inventer des informations propres à l'entreprise.
+    if answer is None:
+        try:
+            from app.services.rag_generation import repondre_hors_documents
+            answer = repondre_hors_documents(
+                payload.message, payload.langue,
+                MODULES.get(payload.module, payload.module),
+            )
+        except Exception:
+            import logging
+            logging.getLogger("erp.rag").exception(
+                "Réponse hors documents indisponible; repli sur les règles fixes"
+            )
+
+    # Repli si le LLM est indisponible : comportement précédent.
     if answer is None:
         if _is_documentary_question(payload.message):
             answer = _document_not_found(payload.langue)
         else:
             answer = _guide(payload.langue, payload.module)
+
+    if not answer or not str(answer).strip():
+        answer = _guide(payload.langue, payload.module)
 
     return {
         "reply": answer,

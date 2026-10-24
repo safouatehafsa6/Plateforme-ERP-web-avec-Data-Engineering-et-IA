@@ -56,8 +56,17 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: 1025
       SMTP_FROM: no-reply@erp-plateforme.exemple
+      
+      # Fournisseur LLM du RAG : ollama (defaut, open source local) | openai | none
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      RAG_LLM_BASE_URL: ${RAG_LLM_BASE_URL:-}
+      RAG_LLM_MODEL: ${RAG_LLM_MODEL:-}
+      RAG_LLM_API_KEY: ${RAG_LLM_API_KEY:-}
+
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - erp-network
     volumes:

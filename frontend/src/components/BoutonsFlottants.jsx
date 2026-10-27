@@ -1,23 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bot, ChevronDown, Headset, MessageCircle, LogIn, UserPlus, X, Bell, CheckCheck, ArrowLeft, LoaderCircle } from "lucide-react";
+import { Bot, ChevronDown, Headset, MessageCircle, LogIn, UserPlus, X, Bell, CheckCheck, ArrowLeft, LoaderCircle, Moon, Sun, Globe } from "lucide-react";
 import { lireSession } from "../api/session";
 import { API_BASE_URL } from "../api/config";
 import { useLangue } from "../context/LangueContext";
+import { useTheme } from "../context/ThemeContext";
 import AssistantIA from "./AssistantIA";
 
 const TEXTES = {
-  fr: { menu: "Ouvrir le menu d’assistance", close: "Fermer le menu", title: "Besoin d’aide ?", assistant: "Assistant IA", support: "Assistance / Contact", whatsapp: "WhatsApp", login: "Connexion", signup: "Créer un compte", unavailable: "Contact non configuré", notifications: "Notifications", markAll: "Tout marquer comme lu", empty: "Aucune notification pour le moment.", loading: "Chargement…", loadError: "Impossible de charger les notifications.", back: "Retour", markRead: "Marquer comme lue", unread: "non lues" },
-  en: { menu: "Open help menu", close: "Close help menu", title: "How can we help?", assistant: "AI Assistant", support: "Support / Contact", whatsapp: "WhatsApp", login: "Sign in", signup: "Create account", unavailable: "Contact is not configured", notifications: "Notifications", markAll: "Mark all as read", empty: "No notifications yet.", loading: "Loading…", loadError: "Could not load notifications.", back: "Back", markRead: "Mark as read", unread: "unread" },
-  ar: { menu: "فتح قائمة المساعدة", close: "إغلاق قائمة المساعدة", title: "كيف يمكننا مساعدتك؟", assistant: "مساعد الذكاء الاصطناعي", support: "الدعم / التواصل", whatsapp: "واتساب", login: "تسجيل الدخول", signup: "إنشاء حساب", unavailable: "بيانات التواصل غير مهيأة", notifications: "الإشعارات", markAll: "تحديد الكل كمقروء", empty: "لا توجد إشعارات حالياً.", loading: "جارٍ التحميل…", loadError: "تعذر تحميل الإشعارات.", back: "رجوع", markRead: "تحديد كمقروء", unread: "غير مقروءة" },
+  fr: { menu: "Ouvrir le menu d’assistance", close: "Fermer le menu", title: "Besoin d’aide ?", assistant: "Assistant IA", support: "Assistance / Contact", whatsapp: "WhatsApp", login: "Connexion", signup: "Créer un compte", unavailable: "Contact non configuré", notifications: "Notifications", markAll: "Tout marquer comme lu", empty: "Aucune notification pour le moment.", loading: "Chargement…", loadError: "Impossible de charger les notifications.", back: "Retour", markRead: "Marquer comme lue", unread: "non lues", dark: "Mode sombre", light: "Mode clair", language: "Langue" },
+  en: { menu: "Open help menu", close: "Close help menu", title: "How can we help?", assistant: "AI Assistant", support: "Support / Contact", whatsapp: "WhatsApp", login: "Sign in", signup: "Create account", unavailable: "Contact is not configured", notifications: "Notifications", markAll: "Mark all as read", empty: "No notifications yet.", loading: "Loading…", loadError: "Could not load notifications.", back: "Back", markRead: "Mark as read", unread: "unread", dark: "Dark mode", light: "Light mode", language: "Language" },
+  ar: { menu: "فتح قائمة المساعدة", close: "إغلاق قائمة المساعدة", title: "كيف يمكننا مساعدتك؟", assistant: "مساعد الذكاء الاصطناعي", support: "الدعم / التواصل", whatsapp: "واتساب", login: "تسجيل الدخول", signup: "إنشاء حساب", unavailable: "بيانات التواصل غير مهيأة", notifications: "الإشعارات", markAll: "تحديد الكل كمقروء", empty: "لا توجد إشعارات حالياً.", loading: "جارٍ التحميل…", loadError: "تعذر تحميل الإشعارات.", back: "رجوع", markRead: "تحديد كمقروء", unread: "غير مقروءة", dark: "الوضع الداكن", light: "الوضع الفاتح", language: "اللغة" },
 };
 
-const PUBLIC_ROUTES = new Set(["/", "/inscription", "/mot-de-passe-oublie", "/fonctionnalites", "/tarifs"]);
+const PUBLIC_ROUTES = new Set(["/", "/inscription", "/mot-de-passe-oublie", "/fonctionnalites", "/tarifs", "/contact"]);
 
 export default function BoutonsFlottants() {
   const { i18n } = useTranslation();
-  const { langueActuelle } = useLangue();
+  const { langueActuelle, changerLangue, langues } = useLangue();
+  const { theme, changerTheme } = useTheme();
   const location = useLocation();
   const navigate = useNavigate();
   const [menuOuvert, setMenuOuvert] = useState(false);
@@ -33,7 +35,6 @@ export default function BoutonsFlottants() {
   const ui = TEXTES[langue] || TEXTES.fr;
   const estPublic = PUBLIC_ROUTES.has(location.pathname) || location.pathname.startsWith("/verifier/");
   const whatsappNumber = (import.meta.env.VITE_WHATSAPP_NUMBER || "").replace(/\D/g, "");
-  const supportEmail = import.meta.env.VITE_SUPPORT_EMAIL || "";
 
   useEffect(() => {
     setMenuOuvert(false);
@@ -129,6 +130,17 @@ export default function BoutonsFlottants() {
   }
 
 
+  // « Assistance / Contact » ouvre une vraie page : le formulaire de demande (connecté)
+  // ou la page Contact (visiteur). On transmet la page d'origine pour la joindre à la demande.
+  function ouvrirSupport() {
+    setMenuOuvert(false);
+    navigate(session && !estPublic ? "/support" : "/contact", { state: { from: location.pathname } });
+  }
+
+  function basculerTheme() {
+    changerTheme(theme === "sombre" ? "clair" : "sombre");
+  }
+
   function ouvrirAssistant() {
     setMenuOuvert(false);
     setAssistantOuvert(true);
@@ -171,14 +183,12 @@ export default function BoutonsFlottants() {
               <Bot size={19} /><span>{ui.assistant}</span>
             </button>
           )}
+          <button type="button" className="boutons-flottants__item" onClick={ouvrirSupport}>
+            <Headset size={19} /><span>{ui.support}</span>
+          </button>
           {whatsappNumber && (
             <a className="boutons-flottants__item" href={`https://wa.me/${whatsappNumber}`} target="_blank" rel="noopener noreferrer">
               <MessageCircle size={19} /><span>{ui.whatsapp}</span>
-            </a>
-          )}
-          {supportEmail && (
-            <a className="boutons-flottants__item" href={`mailto:${supportEmail}?subject=${encodeURIComponent("Support BENJEDDOU ERP")}`}>
-              <Headset size={19} /><span>{ui.support}</span>
             </a>
           )}
           {estPublic && <>
@@ -186,9 +196,17 @@ export default function BoutonsFlottants() {
             <Link className="boutons-flottants__item" to="/inscription" onClick={() => setMenuOuvert(false)}><UserPlus size={19} /><span>{ui.signup}</span></Link>
           </>}
           {!session && !estPublic && <Link className="boutons-flottants__item" to="/" onClick={() => setMenuOuvert(false)}><LogIn size={19} /><span>{ui.login}</span></Link>}
-          {!whatsappNumber && !supportEmail && (estPublic || session) && (
-            <p className="boutons-flottants__note">{ui.unavailable}</p>
-          )}
+          <div className="boutons-flottants__reglages">
+            <button type="button" className="boutons-flottants__item boutons-flottants__item--theme" onClick={basculerTheme} aria-pressed={theme === "sombre"}>
+              {theme === "sombre" ? <Sun size={19} /> : <Moon size={19} />}<span>{theme === "sombre" ? ui.light : ui.dark}</span>
+            </button>
+            <div className="boutons-flottants__langues" role="group" aria-label={ui.language}>
+              <Globe size={17} />
+              {langues.map((l) => (
+                <button key={l.code} type="button" aria-pressed={langueActuelle.code === l.code} onClick={() => changerLangue(l.code)}>{l.code.toUpperCase()}</button>
+              ))}
+            </div>
+          </div>
           </>}
         </section>
       )}

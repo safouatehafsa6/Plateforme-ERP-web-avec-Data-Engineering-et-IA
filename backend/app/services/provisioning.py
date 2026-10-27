@@ -22,6 +22,8 @@ SCRIPTS_SCHEMA_ENTREPRISE = [
     os.path.join(DOSSIER_TEMPLATE, "013_assistant_rag.sql"),
     os.path.join(DOSSIER_TEMPLATE, "014_assistant_documents.sql"),
     os.path.join(DOSSIER_TEMPLATE, "016_assistant_rag_embeddings.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "017_support.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "018_calculs_taux.sql"),
 ]
 
 # Scripts appliqués APRÈS la création du schéma, dans cet ordre. Ils

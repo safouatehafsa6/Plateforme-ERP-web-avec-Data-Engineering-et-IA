@@ -3,7 +3,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, suggestions, notifications, idp
+from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, suggestions, notifications, support, public, calculs
 
 app = FastAPI(title="ERP Backend", version="0.1.0")
 
@@ -35,7 +35,9 @@ app.include_router(assistant_documents.router)
 app.include_router(pipeline.router)
 app.include_router(suggestions.router)
 app.include_router(notifications.router)
-app.include_router(idp.router)
+app.include_router(support.router)
+app.include_router(public.router)
+app.include_router(calculs.router)
 
 
 @app.on_event("startup")

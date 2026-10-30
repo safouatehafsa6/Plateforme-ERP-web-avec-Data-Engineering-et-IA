@@ -1,13 +1,17 @@
+import logging
+import os
 import re
 import secrets
 import unicodedata
 import bcrypt
 from datetime import datetime, timezone
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel
 
 from app.db import pool_central
+from app.security.jwt_utils import exiger_super_admin, obtenir_utilisateur_courant
 from app.security.captcha import generer_captcha
 from app.security.protection import enregistrer_captcha, verifier_et_consommer_captcha
 from app.security.onboarding_store import (
@@ -18,6 +22,7 @@ from app.security.onboarding_store import (
     stocker_admin_temporaire,
     recuperer_admin_temporaire,
     supprimer_admin_temporaire,
+    email_verifie,
 )
 from app.services.provisioning import provisionner_entreprise
 from app.utils.email_sender import envoyer_code_otp
@@ -25,6 +30,26 @@ from app.utils.email_sender import envoyer_code_otp
 router = APIRouter(prefix="/api/entreprises", tags=["entreprises"])
 
 CGU_VERSION_ACTUELLE = "v1"
+
+_bearer_optionnel = HTTPBearer(auto_error=False)
+
+
+def _auto_validation_active() -> bool:
+    """Mode demonstration / developpement UNIQUEMENT : validation automatique
+    du dossier et activation sans Super Admin. Desactive par defaut ; a ne
+    jamais activer en production (ONBOARDING_AUTO_VALIDATION=1)."""
+    return os.getenv("ONBOARDING_AUTO_VALIDATION", "0") == "1"
+
+
+def _exiger_activation_autorisee(identifiants=Depends(_bearer_optionnel)):
+    """Activation d'une entreprise : libre en mode demonstration, sinon
+    reservee au Super Admin."""
+    if _auto_validation_active():
+        return None
+    if identifiants is None:
+        raise HTTPException(status_code=401, detail="Authentification requise.")
+    utilisateur = obtenir_utilisateur_courant(identifiants)
+    return exiger_super_admin(utilisateur)
 
 # Format email volontairement strict : présence d'un "@", d'un domaine
 # avec au moins un point, et aucun espace (voir demande de l'entreprise,
@@ -145,7 +170,11 @@ def inscription(payload: InscriptionPayload):
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM entreprise WHERE email_contact = %s", (email,))
+            cur.execute(
+                "SELECT 1 FROM entreprise WHERE email_contact = %s "
+                "UNION SELECT 1 FROM compte_index WHERE email = %s",
+                (email, email),
+            )
             if cur.fetchone():
                 return JSONResponse(status_code=409, content={
                     "message": "Une inscription existe déjà avec cette adresse email.",
@@ -264,12 +293,16 @@ def soumettre_kyc(payload: KycPayload):
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT type_compte FROM entreprise WHERE id = %s", (payload.entrepriseId,))
+            cur.execute("SELECT type_compte, statut FROM entreprise WHERE id = %s", (payload.entrepriseId,))
             ligne = cur.fetchone()
             if not ligne:
                 return JSONResponse(status_code=404, content={"message": "Entreprise introuvable."})
 
-            type_compte = ligne[0]
+            type_compte, statut_actuel = ligne
+            if statut_actuel != "en_attente":
+                return JSONResponse(status_code=409, content={
+                    "message": "Ce dossier ne peut plus recevoir de documents.",
+                })
             requis = set(DOCUMENTS_REQUIS[type_compte])
             fournis = set(payload.documents.keys())
             manquants = requis - fournis
@@ -291,7 +324,8 @@ def soumettre_kyc(payload: KycPayload):
     # (voir /valider et /refuser). Pour permettre de tester le parcours de
     # bout en bout sans interface Super Admin encore construite, on
     # auto-valide ici — à retirer une fois cette interface développée.
-    _valider_dossier(payload.entrepriseId)
+    if _auto_validation_active():
+        _valider_dossier(payload.entrepriseId)
 
     return {"message": "Documents reçus. Votre dossier est en attente de validation."}
 
@@ -302,19 +336,42 @@ class ValidationPayload(BaseModel):
 
 
 @router.post("/valider")
-def valider_dossier_route(payload: ValidationPayload):
-    _valider_dossier(payload.entrepriseId)
+def valider_dossier_route(payload: ValidationPayload, _: dict = Depends(exiger_super_admin)):
+    if not _changer_statut_si(payload.entrepriseId, "valide", ("en_attente",)):
+        return JSONResponse(status_code=409, content={
+            "message": "Ce dossier ne peut pas être validé dans son état actuel.",
+        })
     return {"message": "Dossier validé."}
 
 
 @router.post("/refuser")
-def refuser_dossier_route(payload: ValidationPayload):
-    _maj_statut(payload.entrepriseId, "refuse")
+def refuser_dossier_route(payload: ValidationPayload, _: dict = Depends(exiger_super_admin)):
+    if not _changer_statut_si(payload.entrepriseId, "refuse", ("en_attente", "valide")):
+        return JSONResponse(status_code=409, content={
+            "message": "Ce dossier ne peut pas être refusé dans son état actuel.",
+        })
     return {"message": "Dossier refusé."}
 
 
-def _valider_dossier(entreprise_id: int) -> None:
-    _maj_statut(entreprise_id, "valide")
+def _valider_dossier(entreprise_id: int) -> bool:
+    return _changer_statut_si(entreprise_id, "valide", ("en_attente",))
+
+
+def _changer_statut_si(entreprise_id: int, nouveau_statut: str, statuts_autorises: tuple) -> bool:
+    """Change le statut SEULEMENT si le statut actuel est autorise (une
+    entreprise active ne peut jamais etre rebasculee par erreur ou abus)."""
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entreprise SET statut = %s WHERE id = %s AND statut = ANY(%s) RETURNING id",
+                (nouveau_statut, entreprise_id, list(statuts_autorises)),
+            )
+            modifie = cur.fetchone() is not None
+        conn.commit()
+    finally:
+        pool_central.putconn(conn)
+    return modifie
 
 
 # --- Étape 4 : Choix de l'abonnement ---
@@ -349,12 +406,12 @@ class PaiementPayload(BaseModel):
 
 
 @router.post("/confirmer-paiement")
-def confirmer_paiement(payload: PaiementPayload):
+def confirmer_paiement(payload: PaiementPayload, _=Depends(_exiger_activation_autorisee)):
     return _activer_entreprise(payload.entrepriseId)
 
 
 @router.post("/activer-essai")
-def activer_essai(payload: PaiementPayload):
+def activer_essai(payload: PaiementPayload, _=Depends(_exiger_activation_autorisee)):
     return _activer_entreprise(payload.entrepriseId)
 
 
@@ -363,10 +420,13 @@ def _activer_entreprise(entreprise_id: int):
     if not admin_temp:
         return JSONResponse(status_code=400, content={"message": "Aucune inscription en attente pour cette entreprise."})
 
+    if not email_verifie(entreprise_id):
+        return JSONResponse(status_code=400, content={"message": "L'adresse email n'a pas été vérifiée."})
+
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT nom_base FROM entreprise WHERE id = %s", (entreprise_id,))
+            cur.execute("SELECT nom_base, statut FROM entreprise WHERE id = %s", (entreprise_id,))
             ligne = cur.fetchone()
     finally:
         pool_central.putconn(conn)
@@ -374,12 +434,21 @@ def _activer_entreprise(entreprise_id: int):
     if not ligne:
         return JSONResponse(status_code=404, content={"message": "Entreprise introuvable."})
 
-    nom_base = ligne[0]
+    nom_base, statut_actuel = ligne
+    if statut_actuel != "valide":
+        return JSONResponse(status_code=409, content={
+            "message": "Le dossier doit être validé avant l'activation.",
+        })
 
     try:
         provisionner_entreprise(nom_base, admin_temp["nom"], admin_temp["email"], admin_temp["mot_de_passe_hash"], entreprise_id)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"message": f"Erreur lors de la création de l'environnement : {e}"})
+    except Exception:
+        logging.getLogger("erp.onboarding").exception(
+            "Provisioning en echec (entreprise %s)", entreprise_id
+        )
+        return JSONResponse(status_code=500, content={
+            "message": "Erreur lors de la création de l'environnement. Réessayez plus tard ou contactez le support.",
+        })
 
     conn = pool_central.getconn()
     try:

@@ -43,6 +43,14 @@ def _ecrire(requete: str, params: tuple) -> int:
         pool_central.putconn(conn)
 
 
+def _entreprise_de(utilisateur: dict) -> str | None:
+    """Entreprise portee par le jeton (None pour le super admin). Les
+    identifiants utilisateur sont propres a chaque base entreprise : sans ce
+    filtre, l'utilisateur n 3 d'une entreprise verrait celui d'une autre."""
+    entreprise_id = utilisateur.get("entrepriseId")
+    return str(entreprise_id) if entreprise_id is not None else None
+
+
 def _formater(ligne, jti_courant: str) -> dict:
     return {
         "id": ligne[0],
@@ -108,10 +116,11 @@ def lister_mes_sessions(utilisateur: dict = Depends(utilisateur_connecte)):
     lignes = _lire(
         f"""
         SELECT {COLONNES} FROM session_utilisateur
-        WHERE type_compte = %s AND utilisateur_id = %s AND {ACTIVE}
+        WHERE type_compte = %s AND utilisateur_id = %s
+          AND entreprise_id IS NOT DISTINCT FROM %s AND {ACTIVE}
         ORDER BY derniere_activite DESC
         """,
-        (utilisateur["type"], str(utilisateur["id"])),
+        (utilisateur["type"], str(utilisateur["id"]), _entreprise_de(utilisateur)),
     )
     return {"sessions": [_formater(l, utilisateur["jti"]) for l in lignes]}
 
@@ -125,8 +134,10 @@ def mes_evenements(
 ):
     """Journal de securite de la personne connectee (ses propres evenements)."""
     return _evenements(
+        "entreprise_id IS NOT DISTINCT FROM %s AND "
         "(LOWER(email) = LOWER(%s) OR (type_compte = %s AND utilisateur_id = %s))",
-        (utilisateur["email"], utilisateur["type"], str(utilisateur["id"])),
+        (_entreprise_de(utilisateur), utilisateur["email"], utilisateur["type"],
+         str(utilisateur["id"])),
         type, None, None, limit, avant,
     )
 
@@ -149,9 +160,11 @@ def revoquer_les_autres_sessions(request: Request, utilisateur: dict = Depends(u
         """
         UPDATE session_utilisateur
         SET revoquee_le = NOW(), motif_revocation = 'revoquee_par_utilisateur'
-        WHERE type_compte = %s AND utilisateur_id = %s AND jti <> %s AND revoquee_le IS NULL
+        WHERE type_compte = %s AND utilisateur_id = %s AND jti <> %s
+          AND entreprise_id IS NOT DISTINCT FROM %s AND revoquee_le IS NULL
         """,
-        (utilisateur["type"], str(utilisateur["id"]), utilisateur["jti"]),
+        (utilisateur["type"], str(utilisateur["id"]), utilisateur["jti"],
+         _entreprise_de(utilisateur)),
     )
     _journal("session_revoquee", utilisateur, request, "avertissement",
              {"motif": "revoquee_par_utilisateur", "nb": nombre})
@@ -165,9 +178,10 @@ def revoquer_ma_session(jti: str, request: Request, utilisateur: dict = Depends(
         """
         UPDATE session_utilisateur
         SET revoquee_le = NOW(), motif_revocation = 'revoquee_par_utilisateur'
-        WHERE jti = %s AND type_compte = %s AND utilisateur_id = %s AND revoquee_le IS NULL
+        WHERE jti = %s AND type_compte = %s AND utilisateur_id = %s
+          AND entreprise_id IS NOT DISTINCT FROM %s AND revoquee_le IS NULL
         """,
-        (jti, utilisateur["type"], str(utilisateur["id"])),
+        (jti, utilisateur["type"], str(utilisateur["id"]), _entreprise_de(utilisateur)),
     )
     if nombre == 0:
         raise HTTPException(status_code=404, detail="Session introuvable ou d\u00e9j\u00e0 ferm\u00e9e.")

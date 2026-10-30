@@ -23,6 +23,36 @@ from fastapi.responses import JSONResponse
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def _abonnement_suspendu(entreprise_id) -> bool:
+    """Vrai si l'abonnement COURANT (le plus recent) de l'entreprise est suspendu.
+    Une entreprise sans abonnement n'est pas bloquee (anciennes bases de test)."""
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT statut FROM abonnement WHERE entreprise_id = %s ORDER BY id DESC LIMIT 1",
+                (entreprise_id,),
+            )
+            ligne = cur.fetchone()
+    finally:
+        pool_central.putconn(conn)
+    return bool(ligne) and ligne[0] == "suspendu"
+
+
+def _refus_si_abonnement_suspendu(entreprise_id, type_compte, email, request):
+    """Appele APRES la verification du mot de passe (aucune fuite d'information
+    sur l'etat de l'entreprise pour un mauvais mot de passe). Renvoie une
+    reponse 403 si l'acces doit etre refuse, sinon None."""
+    if not _abonnement_suspendu(entreprise_id):
+        return None
+    journaliser("connexion_refusee", gravite="avertissement", succes=False,
+                type_compte=type_compte, email=email, entreprise_id=entreprise_id,
+                request=request, details={"raison": "abonnement_suspendu"})
+    return JSONResponse(status_code=403, content={
+        "message": "L'abonnement de cette entreprise est suspendu. Contactez le support de la plateforme.",
+    })
+
+
 class LoginPayload(BaseModel):
     email: str
     motDePasse: str
@@ -168,6 +198,9 @@ async def login(payload: LoginPayload, request: Request):
                 mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
                 if mot_de_passe_valide:
+                    refus = _refus_si_abonnement_suspendu(entreprise_id, "externe", email, request)
+                    if refus:
+                        return refus
                     reinitialiser_tentatives(email)
                     token = emettre_jeton(
                         {
@@ -205,6 +238,9 @@ async def login(payload: LoginPayload, request: Request):
                 mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
                 if mot_de_passe_valide:
+                    refus = _refus_si_abonnement_suspendu(entreprise_id, "interne", email, request)
+                    if refus:
+                        return refus
                     reinitialiser_tentatives(email)
                     token = emettre_jeton(
                         {

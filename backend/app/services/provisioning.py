@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from psycopg2 import sql
 
 from app.db import pool_central
 
@@ -54,7 +55,10 @@ def creer_base_entreprise(nom_base: str) -> None:
     conn = _connexion_maintenance()
     try:
         with conn.cursor() as cur:
-            cur.execute(f'CREATE DATABASE "{nom_base}"')
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (nom_base,))
+            if cur.fetchone():
+                return  # reprise apres un echec partiel : la base existe deja
+            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(nom_base)))
     finally:
         conn.close()
 
@@ -182,12 +186,36 @@ def indexer_compte_central(email: str, entreprise_id: int, nom_base: str, type_c
         raise CompteDejaIndexeError("Cet email est deja rattache a une autre entreprise.")
 
 
+def _schema_existe(nom_base: str) -> bool:
+    conn = psycopg2.connect(host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=nom_base)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.utilisateur') IS NOT NULL")
+            return bool(cur.fetchone()[0])
+    finally:
+        conn.close()
+
+
+def _admin_existe(nom_base: str, email: str) -> bool:
+    conn = psycopg2.connect(host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=nom_base)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM utilisateur WHERE LOWER(email) = LOWER(%s))", (email,))
+            return bool(cur.fetchone()[0])
+    finally:
+        conn.close()
+
+
 def provisionner_entreprise(nom_base: str, nom_admin: str, email_admin: str, mot_de_passe_hash: str, entreprise_id: int) -> None:
     """Orchestre les étapes du provisioning, dans l'ordre. Si une étape
     échoue, l'exception remonte pour que l'appelant puisse marquer
     l'entreprise en erreur plutôt que 'active' à tort."""
+    # Chaque etape est rejouable : un echec partiel peut etre repris sans erreur
+    # « base deja existante » ni doublon.
     creer_base_entreprise(nom_base)
-    initialiser_schema_entreprise(nom_base)
-    creer_administrateur_entreprise(nom_base, nom_admin, email_admin, mot_de_passe_hash)
+    if not _schema_existe(nom_base):
+        initialiser_schema_entreprise(nom_base)
+    if not _admin_existe(nom_base, email_admin):
+        creer_administrateur_entreprise(nom_base, nom_admin, email_admin, mot_de_passe_hash)
     appliquer_seed_rbac(nom_base)
     indexer_compte_central(email_admin, entreprise_id, nom_base)

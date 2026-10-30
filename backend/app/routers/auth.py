@@ -1,7 +1,7 @@
 import os
 import bcrypt
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db import pool_central, get_pool_entreprise
 from app.security.captcha import generer_captcha
@@ -19,6 +19,7 @@ from app.security.sessions import emettre_jeton, revoquer_sessions_par_email
 from app.security.audit import journaliser
 from app.utils.email_sender import envoyer_code_reinitialisation
 from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -53,9 +54,13 @@ def _refus_si_abonnement_suspendu(entreprise_id, type_compte, email, request):
     })
 
 
+# Hash factice : meme cout de calcul pour un email inconnu et un email connu.
+_HASH_FACTICE = bcrypt.hashpw(b"mot-de-passe-factice", bcrypt.gensalt())
+
+
 class LoginPayload(BaseModel):
-    email: str
-    motDePasse: str
+    email: str = Field(max_length=150)
+    motDePasse: str = Field(max_length=72)
     captchaId: str | None = None
     captchaValeur: str | None = None
     recaptchaToken: str | None = None
@@ -65,7 +70,7 @@ class LoginPayload(BaseModel):
 def obtenir_captcha():
     captcha = generer_captcha()
     enregistrer_captcha(captcha["id"], captcha["code"])
-    if os.getenv("ENV", "dev") != "production":
+    if os.getenv("ENV", "production") in ("dev", "development"):
         print(f"[DEV] Captcha {captcha['id']} -> code: {captcha['code']}")
     return {"captchaId": captcha["id"], "svg": captcha["svg"]}
 
@@ -131,7 +136,8 @@ async def login(payload: LoginPayload, request: Request):
 
     if ligne_super_admin:
         utilisateur_id, nom, email_bd, hash_stocke = ligne_super_admin
-        mot_de_passe_valide = bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+        mot_de_passe_valide = await run_in_threadpool(
+            bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
         if not mot_de_passe_valide:
             journaliser("connexion_echouee", gravite="avertissement", succes=False,
@@ -195,7 +201,8 @@ async def login(payload: LoginPayload, request: Request):
 
             if ligne_externe:
                 utilisateur_id, hash_stocke, actif, client_id, client_nom = ligne_externe
-                mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+                mot_de_passe_valide = actif and await run_in_threadpool(
+                    bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
                 if mot_de_passe_valide:
                     refus = _refus_si_abonnement_suspendu(entreprise_id, "externe", email, request)
@@ -235,7 +242,8 @@ async def login(payload: LoginPayload, request: Request):
 
             if ligne_utilisateur:
                 utilisateur_id, nom, prenom, hash_stocke, actif, role_nom = ligne_utilisateur
-                mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+                mot_de_passe_valide = actif and await run_in_threadpool(
+                    bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
                 if mot_de_passe_valide:
                     refus = _refus_si_abonnement_suspendu(entreprise_id, "interne", email, request)
@@ -256,6 +264,11 @@ async def login(payload: LoginPayload, request: Request):
                             "role": role_nom, "entrepriseId": entreprise_id,
                         },
                     }
+
+    if not ligne_super_admin and not ligne_index:
+        # Meme cout de calcul qu'un vrai compte : le temps de reponse ne revele
+        # pas si l'adresse email existe.
+        await run_in_threadpool(bcrypt.checkpw, b"mot-de-passe-factice", _HASH_FACTICE)
 
     # Ni super_admin, ni compte d'entreprise valide : même message
     # générique dans tous les cas (anti-énumération).

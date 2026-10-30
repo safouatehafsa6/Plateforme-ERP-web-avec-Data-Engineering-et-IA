@@ -1,18 +1,44 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import logging
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.db import pool_central
 from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, suggestions, notifications, support, public, calculs, idp, outils
 
 app = FastAPI(title="ERP Backend", version="0.1.0")
 
+def _origines_cors() -> list[str]:
+    """Origines autorisees a appeler l'API (variable CORS_ORIGINS, separees par
+    des virgules). Par defaut : uniquement l'interface locale."""
+    brut = os.getenv("CORS_ORIGINS", "")
+    if brut.strip():
+        return [o.strip() for o in brut.split(",") if o.strip()]
+    return [
+        "http://localhost:3000", "http://127.0.0.1:3000",
+        "http://localhost:5173", "http://127.0.0.1:5173",
+    ]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origines_cors(),
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def entetes_securite(request, call_next):
+    reponse = await call_next(request)
+    reponse.headers.setdefault("X-Content-Type-Options", "nosniff")
+    reponse.headers.setdefault("Referrer-Policy", "no-referrer")
+    if request.url.path.startswith("/api/") and reponse.headers.get("content-type", "").startswith("application/json"):
+        reponse.headers.setdefault("Cache-Control", "no-store")
+    return reponse
 
 app.include_router(auth.router)
 app.include_router(sessions.router)
@@ -52,6 +78,36 @@ def preparer_notifications():
         logging.getLogger("erp.notifications").exception(
             "Table des notifications non créée au démarrage (nouvel essai à la première utilisation)"
         )
+
+
+def verifier_configuration() -> None:
+    """Refuse de demarrer avec un secret JWT absent ou trop court."""
+    if len(os.environ.get("JWT_SECRET", "")) < 32:
+        raise RuntimeError("JWT_SECRET absent ou trop court (32 caracteres minimum).")
+
+
+def assurer_index_sessions() -> None:
+    """Index sur session_utilisateur.expire_le (nettoyage des sessions a chaque
+    connexion). Idempotent ; ne bloque jamais le demarrage."""
+    try:
+        conn = pool_central.getconn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_session_utilisateur_expire "
+                    "ON session_utilisateur (expire_le)"
+                )
+            conn.commit()
+        finally:
+            pool_central.putconn(conn)
+    except Exception:
+        logging.getLogger("erp.securite").exception("Index des sessions non cree au demarrage")
+
+
+@app.on_event("startup")
+def preparer_securite():
+    verifier_configuration()
+    assurer_index_sessions()
 
 
 @app.get("/api/health")

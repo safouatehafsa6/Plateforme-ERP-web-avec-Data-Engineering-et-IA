@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db import pool_central
 from app.security.jwt_utils import exiger_super_admin, obtenir_utilisateur_courant
@@ -152,7 +152,7 @@ def _erreurs_validation_inscription(payload: "InscriptionPayload") -> list[str]:
 
     mdp = payload.motDePasse or ""
     if (
-        len(mdp) < 8
+        len(mdp) < 8 or len(mdp.encode("utf-8")) > 72
         or not REGEX_LETTRE.search(mdp)
         or not REGEX_CHIFFRE.search(mdp)
         or not REGEX_SPECIAL.search(mdp)
@@ -172,18 +172,18 @@ def _erreurs_validation_inscription(payload: "InscriptionPayload") -> list[str]:
 
 # --- Étape 1 : choix du type + inscription ---
 class InscriptionPayload(BaseModel):
-    typeCompte: str  # "personne_physique" | "entreprise"
-    nomEntreprise: str | None = None   # requis si entreprise
-    secteur: str | None = None
-    nomAdmin: str                       # nom complet (personne physique) ou nom du représentant (entreprise)
-    email: str
-    emailConfirmation: str
-    telephone: str | None = None
-    motDePasse: str
-    motDePasseConfirmation: str
+    typeCompte: str = Field(max_length=20)  # "personne_physique" | "entreprise"
+    nomEntreprise: str | None = Field(None, max_length=150)   # requis si entreprise
+    secteur: str | None = Field(None, max_length=100)
+    nomAdmin: str = Field(max_length=150)  # nom complet (personne physique) ou nom du représentant (entreprise)
+    email: str = Field(max_length=150)
+    emailConfirmation: str = Field(max_length=150)
+    telephone: str | None = Field(None, max_length=30)
+    motDePasse: str = Field(max_length=72)
+    motDePasseConfirmation: str = Field(max_length=72)
     cguAccepte: bool
-    captchaId: str
-    captchaValeur: str
+    captchaId: str = Field(max_length=100)
+    captchaValeur: str = Field(max_length=20)
 
 
 @router.get("/captcha")
@@ -231,7 +231,8 @@ def inscription(payload: InscriptionPayload):
     identifiant_unique = secrets.token_hex(4).upper()
 
     nom_pour_base = payload.nomEntreprise if payload.typeCompte == "entreprise" else payload.nomAdmin
-    nom_base = f"compte_{_slugifier(nom_pour_base)}_{identifiant_unique.lower()}"
+    # Slug borne : PostgreSQL tronque les noms de base au-dela de 63 caracteres.
+    nom_base = f"compte_{_slugifier(nom_pour_base)[:40]}_{identifiant_unique.lower()}"
     nom_enregistre = payload.nomEntreprise if payload.typeCompte == "entreprise" else payload.nomAdmin
     secteur = payload.secteur if payload.typeCompte == "entreprise" else None
 
@@ -362,10 +363,15 @@ def soumettre_kyc(payload: KycPayload, jeton: str | None = Header(None, alias="X
                     "message": f"Documents manquants pour ce type de compte : {', '.join(manquants)}.",
                 })
 
+            if fournis - requis:
+                return JSONResponse(status_code=400, content={
+                    "message": "Document non attendu pour ce type de compte.",
+                })
+
             for type_doc, nom_fichier in payload.documents.items():
                 cur.execute(
                     "INSERT INTO document_kyc (entreprise_id, type_document, nom_fichier) VALUES (%s, %s, %s)",
-                    (payload.entrepriseId, type_doc, nom_fichier),
+                    (payload.entrepriseId, type_doc, str(nom_fichier)[:255]),
                 )
         conn.commit()
     finally:

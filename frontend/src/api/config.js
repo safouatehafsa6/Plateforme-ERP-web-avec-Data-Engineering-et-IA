@@ -19,10 +19,10 @@ export async function apiGet(endpoint) {
   return data;
 }
 
-export async function apiPost(endpoint, body) {
+export async function apiPost(endpoint, body, entetes = {}) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...entetes },
     body: JSON.stringify(body),
   });
 

@@ -110,13 +110,15 @@ class TestActivationControlee(Base):
         activer.assert_called_once()
 
     def test_kyc_refuse_pour_une_entreprise_deja_active(self):
-        with patch.object(entreprises, "pool_central", faux_pool(("personne_physique", "actif"))):
+        with patch.object(entreprises, "pool_central", faux_pool(("personne_physique", "actif"))), \
+             patch.object(entreprises, "_exiger_jeton_inscription"):
             rep = self.client.post("/api/entreprises/kyc", json={
                 "entrepriseId": 1, "documents": {"cin": "cin.pdf"}})
         self.assertEqual(rep.status_code, 409)
 
     def test_kyc_sans_mode_demo_ne_valide_pas_automatiquement(self):
         with patch.object(entreprises, "pool_central", faux_pool(("personne_physique", "en_attente"))), \
+             patch.object(entreprises, "_exiger_jeton_inscription"), \
              patch.object(entreprises, "_valider_dossier") as valider:
             rep = self.client.post("/api/entreprises/kyc", json={
                 "entrepriseId": 1, "documents": {"cin": "cin.pdf"}})

@@ -43,9 +43,10 @@ class TestEmailDisponiblePour(unittest.TestCase):
     def test_email_libre(self):
         self.assertTrue(self._dispo(None, 1))
 
-    def test_email_deja_dans_la_meme_entreprise(self):
-        self.assertTrue(self._dispo((1,), 1))
-        self.assertTrue(self._dispo((1,), "1"))
+    def test_email_deja_indexe_dans_la_meme_entreprise_refuse(self):
+        # Un compte du meme email (interne ou externe) existe deja : on refuse.
+        self.assertFalse(self._dispo((1,), 1))
+        self.assertFalse(self._dispo((1,), "1"))
 
     def test_email_d_une_autre_entreprise(self):
         self.assertFalse(self._dispo((2,), 1))

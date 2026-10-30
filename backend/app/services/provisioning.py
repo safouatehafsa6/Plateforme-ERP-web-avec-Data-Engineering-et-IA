@@ -127,8 +127,9 @@ class CompteDejaIndexeError(Exception):
 
 
 def email_disponible_pour(email: str, entreprise_id) -> bool:
-    """Vrai si l'email est libre ou deja rattache a CETTE entreprise.
-    A appeler AVANT de creer un compte dans la base d'une entreprise."""
+    """Vrai seulement si l'email n'est rattache a AUCUN compte (interne ou
+    externe, de cette entreprise ou d'une autre). A appeler AVANT de creer un
+    compte dans la base d'une entreprise."""
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
@@ -139,7 +140,7 @@ def email_disponible_pour(email: str, entreprise_id) -> bool:
             ligne = cur.fetchone()
     finally:
         pool_central.putconn(conn)
-    return ligne is None or str(ligne[0]) == str(entreprise_id)
+    return ligne is None
 
 
 def indexer_compte_central(email: str, entreprise_id: int, nom_base: str, type_compte: str = "interne") -> None:

@@ -17,7 +17,8 @@ from pydantic import BaseModel
 
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import exiger_role_admin
-from app.services.provisioning import indexer_compte_central
+from app.security.sessions import revoquer_sessions_par_email
+from app.services.provisioning import indexer_compte_central, email_disponible_pour
 
 router = APIRouter(prefix="/api/utilisateurs-externes", tags=["utilisateurs-externes"])
 
@@ -85,6 +86,13 @@ def creer_utilisateur_externe(payload: NouvelUtilisateurExternePayload, utilisat
     if not payload.clientId and not payload.clientNom:
         raise HTTPException(status_code=400, detail="Choisissez un client existant ou renseignez son nom pour en créer un.")
 
+    # Controle AVANT toute creation : un email deja rattache a une entreprise
+    # (la meme ou une autre) ne doit jamais etre detourne ni dedouble.
+    if utilisateur.get("entrepriseId") is not None and not email_disponible_pour(
+        email, utilisateur["entrepriseId"]
+    ):
+        raise HTTPException(status_code=409, detail="Un compte existe déjà avec cet email.")
+
     pool_tenant = get_pool_entreprise(utilisateur["nomBase"])
     mot_de_passe_temporaire = secrets.token_urlsafe(9)
     mot_de_passe_hash = bcrypt.hashpw(mot_de_passe_temporaire.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
@@ -143,13 +151,19 @@ def basculer_actif(utilisateur_externe_id: int, payload: ToggleActifPayload, uti
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE utilisateur_externe SET actif = %s WHERE id = %s RETURNING id",
+                "UPDATE utilisateur_externe SET actif = %s WHERE id = %s RETURNING id, email",
                 (payload.actif, utilisateur_externe_id),
             )
-            if not cur.fetchone():
+            ligne = cur.fetchone()
+            if not ligne:
                 raise HTTPException(status_code=404, detail="Compte externe introuvable.")
+            email_cible = ligne[1]
         conn.commit()
     finally:
         pool_tenant.putconn(conn)
+
+    if not payload.actif:
+        # Un compte desactive ne doit plus rester connecte.
+        revoquer_sessions_par_email(email_cible, "compte_desactive", "externe")
 
     return {"message": "Statut mis à jour."}

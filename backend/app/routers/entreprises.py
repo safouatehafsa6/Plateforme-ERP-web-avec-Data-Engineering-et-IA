@@ -4,8 +4,9 @@ import re
 import secrets
 import unicodedata
 import bcrypt
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+import jwt
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel
@@ -41,15 +42,60 @@ def _auto_validation_active() -> bool:
     return os.getenv("ONBOARDING_AUTO_VALIDATION", "0") == "1"
 
 
-def _exiger_activation_autorisee(identifiants=Depends(_bearer_optionnel)):
-    """Activation d'une entreprise : libre en mode demonstration, sinon
-    reservee au Super Admin."""
-    if _auto_validation_active():
-        return None
+DUREE_JETON_INSCRIPTION = timedelta(hours=2)
+PLANS_VALIDES = ("essai", "standard", "premium")
+
+
+def _super_admin_optionnel(identifiants=Depends(_bearer_optionnel)):
+    """Super Admin authentifie si un jeton de session est fourni, sinon None.
+    Un jeton de session invalide est refuse (401)."""
     if identifiants is None:
-        raise HTTPException(status_code=401, detail="Authentification requise.")
+        return None
     utilisateur = obtenir_utilisateur_courant(identifiants)
     return exiger_super_admin(utilisateur)
+
+
+def _emettre_jeton_inscription(entreprise_id) -> str:
+    """Jeton signe, a duree limitee, delivre APRES validation de l'OTP.
+    Il porte une audience speciale : il est refuse partout ailleurs (jamais
+    accepte comme jeton de session)."""
+    return jwt.encode(
+        {
+            "sub": str(entreprise_id),
+            "scope": "inscription",
+            "aud": "inscription",
+            "exp": datetime.now(timezone.utc) + DUREE_JETON_INSCRIPTION,
+        },
+        os.environ["JWT_SECRET"],
+        algorithm="HS256",
+    )
+
+
+def _exiger_jeton_inscription(entreprise_id, jeton) -> None:
+    """401 si le jeton est absent/invalide/expire, 403 s'il concerne une
+    autre entreprise."""
+    if not jeton:
+        raise HTTPException(status_code=401, detail="Jeton d'inscription manquant. Recommencez la vérification de l'email.")
+    try:
+        charge = jwt.decode(jeton, os.environ["JWT_SECRET"], algorithms=["HS256"], audience="inscription")
+    except (jwt.InvalidTokenError, KeyError):
+        raise HTTPException(status_code=401, detail="Jeton d'inscription invalide ou expiré.")
+    if charge.get("scope") != "inscription" or charge.get("sub") != str(entreprise_id):
+        raise HTTPException(status_code=403, detail="Ce jeton ne correspond pas à cette inscription.")
+
+
+def _plan_est_essai(entreprise_id) -> bool:
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT type_plan FROM abonnement WHERE entreprise_id = %s ORDER BY id DESC LIMIT 1",
+                (entreprise_id,),
+            )
+            ligne = cur.fetchone()
+    finally:
+        pool_central.putconn(conn)
+    return bool(ligne) and ligne[0] == "essai"
 
 # Format email volontairement strict : présence d'un "@", d'un domaine
 # avec au moins un point, et aucun espace (voir demande de l'entreprise,
@@ -246,7 +292,10 @@ def verifier_otp_route(payload: OtpPayload):
         }
         return JSONResponse(status_code=400, content={"message": messages.get(raison, "Code invalide."), "raison": raison})
 
-    return {"message": "Vérification réussie."}
+    return {
+        "message": "Vérification réussie.",
+        "jetonInscription": _emettre_jeton_inscription(payload.entrepriseId),
+    }
 
 
 class RenvoiOtpPayload(BaseModel):
@@ -289,7 +338,9 @@ class KycPayload(BaseModel):
 
 
 @router.post("/kyc")
-def soumettre_kyc(payload: KycPayload):
+def soumettre_kyc(payload: KycPayload, jeton: str | None = Header(None, alias="X-Jeton-Inscription")):
+    if not _auto_validation_active():
+        _exiger_jeton_inscription(payload.entrepriseId, jeton)
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
@@ -381,7 +432,11 @@ class AbonnementPayload(BaseModel):
 
 
 @router.post("/abonnement")
-def choisir_abonnement(payload: AbonnementPayload):
+def choisir_abonnement(payload: AbonnementPayload, jeton: str | None = Header(None, alias="X-Jeton-Inscription")):
+    if not _auto_validation_active():
+        _exiger_jeton_inscription(payload.entrepriseId, jeton)
+    if payload.plan not in PLANS_VALIDES:
+        return JSONResponse(status_code=400, content={"message": "Plan d'abonnement invalide."})
     if not _statut_est(payload.entrepriseId, "valide"):
         return JSONResponse(status_code=400, content={"message": "Votre dossier doit être validé avant de choisir un abonnement."})
 
@@ -406,12 +461,24 @@ class PaiementPayload(BaseModel):
 
 
 @router.post("/confirmer-paiement")
-def confirmer_paiement(payload: PaiementPayload, _=Depends(_exiger_activation_autorisee)):
+def confirmer_paiement(payload: PaiementPayload, acteur=Depends(_super_admin_optionnel)):
+    # Le paiement est simule : tant qu'aucun prestataire reel n'est branche,
+    # seule l'administration de la plateforme (ou le mode demo) peut confirmer.
+    if acteur is None and not _auto_validation_active():
+        raise HTTPException(status_code=403, detail="Le paiement doit être confirmé par l'administration de la plateforme.")
     return _activer_entreprise(payload.entrepriseId)
 
 
 @router.post("/activer-essai")
-def activer_essai(payload: PaiementPayload, _=Depends(_exiger_activation_autorisee)):
+def activer_essai(
+    payload: PaiementPayload,
+    acteur=Depends(_super_admin_optionnel),
+    jeton: str | None = Header(None, alias="X-Jeton-Inscription"),
+):
+    if acteur is None and not _auto_validation_active():
+        _exiger_jeton_inscription(payload.entrepriseId, jeton)
+        if not _plan_est_essai(payload.entrepriseId):
+            raise HTTPException(status_code=403, detail="Ce plan nécessite un paiement confirmé.")
     return _activer_entreprise(payload.entrepriseId)
 
 

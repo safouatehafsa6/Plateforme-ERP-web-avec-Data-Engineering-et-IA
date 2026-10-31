@@ -121,7 +121,7 @@ class TestAuth(unittest.TestCase):
     def test_login_ne_bloque_plus_le_serveur(self):
         source = inspect.getsource(auth.login)
         self.assertNotIn("bcrypt.checkpw(", source)
-        self.assertEqual(source.count("run_in_threadpool("), 4)  # 3 profils + faux hash
+        self.assertEqual(len(__import__("re").findall(r"run_in_threadpool\(\s*bcrypt\.checkpw", source)), 4)  # 3 profils + faux hash
 
     def test_captcha_jamais_affiche_par_defaut(self):
         with patch.dict(os.environ, {}), patch("builtins.print") as imprimer:

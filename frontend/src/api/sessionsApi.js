@@ -41,6 +41,14 @@ export async function deconnecter() {
   }
 }
 
+// Appareils (gestion avancee)
+export const listerMesAppareils = () => appelAuth("GET", "/appareils");
+export const actionAppareil = (id, action) => appelAuth("POST", `/appareils/${id}/${action}`);
+export const supprimerAppareil = (id) => appelAuth("DELETE", `/appareils/${id}`);
+export const listerAppareilsEntreprise = () => appelAuth("GET", "/admin/appareils");
+export const actionAppareilEntreprise = (id, action) => appelAuth("POST", `/admin/appareils/${id}/${action}`);
+export const supprimerAppareilEntreprise = (id) => appelAuth("DELETE", `/admin/appareils/${id}`);
+
 // Journal de securite (phase A)
 export const listerMesEvenements = (limite = 20) => appelAuth("GET", `/sessions/evenements?limit=${limite}`);
 export const listerEvenementsEntreprise = (limite = 30) => appelAuth("GET", `/admin/sessions/evenements?limit=${limite}`);

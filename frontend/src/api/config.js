@@ -2,6 +2,28 @@
 // En développement, elle pointe vers le backend local (voir docker-compose.yml).
 export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
+// Identifiant aleatoire de CE navigateur, cree une fois et conserve. Il est
+// envoye a la connexion (en-tete X-Appareil-Id) pour reconnaitre l'appareil ;
+// le serveur n'en garde que l'empreinte.
+export function identifiantAppareil() {
+  try {
+    let id = localStorage.getItem("appareil_id");
+    if (!id) {
+      if (window.crypto && window.crypto.randomUUID) {
+        id = window.crypto.randomUUID();
+      } else {
+        const octets = new Uint8Array(16);
+        window.crypto.getRandomValues(octets);
+        id = Array.from(octets, (o) => o.toString(16).padStart(2, "0")).join("");
+      }
+      localStorage.setItem("appareil_id", id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}
+
 export async function apiGet(endpoint) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`);
   const data = await res.json().catch(() => null);
@@ -22,7 +44,7 @@ export async function apiGet(endpoint) {
 export async function apiPost(endpoint, body, entetes = {}) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...entetes },
+    headers: { "Content-Type": "application/json", "X-Appareil-Id": identifiantAppareil(), ...entetes },
     body: JSON.stringify(body),
   });
 

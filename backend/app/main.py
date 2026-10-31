@@ -7,7 +7,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db import pool_central
-from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, suggestions, notifications, support, public, calculs, idp, outils
+from app.security.appareils import AppareilRefuse, assurer_schema as assurer_schema_appareils
+from fastapi.responses import JSONResponse
+from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, appareils, suggestions, notifications, support, public, calculs, idp, outils
 
 app = FastAPI(title="ERP Backend", version="0.1.0")
 
@@ -43,6 +45,8 @@ async def entetes_securite(request, call_next):
 app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(sessions.router_admin)
+app.include_router(appareils.router)
+app.include_router(appareils.router_admin)
 app.include_router(entreprises.router)
 app.include_router(admin.router)
 app.include_router(utilisateurs.router)
@@ -80,6 +84,11 @@ def preparer_notifications():
         )
 
 
+@app.exception_handler(AppareilRefuse)
+async def appareil_refuse(request, exc):
+    return JSONResponse(status_code=403, content={"message": exc.message})
+
+
 def verifier_configuration() -> None:
     """Refuse de demarrer avec un secret JWT absent ou trop court."""
     if len(os.environ.get("JWT_SECRET", "")) < 32:
@@ -108,6 +117,7 @@ def assurer_index_sessions() -> None:
 def preparer_securite():
     verifier_configuration()
     assurer_index_sessions()
+    assurer_schema_appareils()
 
 
 @app.get("/api/health")

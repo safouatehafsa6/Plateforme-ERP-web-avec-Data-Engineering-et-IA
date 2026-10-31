@@ -1,6 +1,8 @@
+
 // Centralise l'URL de base de l'API pour ne jamais la répéter dans le code.
-// En développement, elle pointe vers le backend local (voir docker-compose.yml).
-export const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+// L'API est accessible depuis Windows et Rocky Linux via l'adresse IP de la VM.
+export const API_BASE_URL =
+  import.meta.env.VITE_API_URL || "http://192.168.244.130:8000/api";
 
 export async function apiGet(endpoint) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`);

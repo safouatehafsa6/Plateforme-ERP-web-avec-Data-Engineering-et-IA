@@ -15,6 +15,7 @@ import jwt
 from fastapi import HTTPException, Request
 
 from app.db import pool_central
+from app.security.alertes import traiter_connexion
 from app.security.appareils import enregistrer_connexion
 from app.security.audit import journaliser
 
@@ -167,6 +168,8 @@ def emettre_jeton(claims: dict, request: Request) -> str:
     if app_info["nouveau"]:
         journaliser("nouvel_appareil", gravite="avertissement", succes=True,
                     details={"raison": "nouvel_appareil"}, **commun)
+    # Detection des connexions inhabituelles (jamais bloquante).
+    traiter_connexion(claims, request, info, adresse_ip(request), app_info, jti)
     if nb_limite:
         journaliser("session_revoquee", gravite="avertissement",
                     details={"motif": "limite_sessions", "nb": nb_limite}, **commun)

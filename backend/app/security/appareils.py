@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 
 from app.db import pool_central
+from app.security.alertes import notifier_appareil_en_attente
 from app.security.audit import journaliser
 
 _log = logging.getLogger("appareils")
@@ -131,6 +132,7 @@ def enregistrer_connexion(claims: dict, request, info: dict, ip) -> dict:
     if statut == "en_attente":
         journaliser("appareil_en_attente", gravite="avertissement", succes=False,
                     details={"raison": "nouvel_appareil"}, **commun)
+        notifier_appareil_en_attente(claims, nom)
         raise AppareilRefuse(
             "Nouvel appareil détecté : il doit être autorisé par votre administrateur "
             "(ou depuis un appareil déjà connecté) avant de pouvoir se connecter."

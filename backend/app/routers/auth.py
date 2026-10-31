@@ -11,11 +11,13 @@ from app.security.protection import (
     etat_protection,
     enregistrer_echec,
     reinitialiser_tentatives,
+    ip_courante,
+    verrouillage,
 )
 from app.security.recaptcha import verifier_recaptcha
 from app.security.validation_inscription import valider_mot_de_passe
 from app.security import password_reset_store as reset_store
-from app.security.sessions import emettre_jeton, revoquer_sessions_par_email
+from app.security.sessions import adresse_ip, emettre_jeton, revoquer_sessions_par_email
 from app.security.audit import journaliser
 from app.utils.email_sender import envoyer_code_reinitialisation
 from fastapi.responses import JSONResponse
@@ -78,7 +80,22 @@ def obtenir_captcha():
 @router.post("/login")
 async def login(payload: LoginPayload, request: Request):
     email = payload.email.strip().lower()
-    etat = etat_protection(email)
+
+    # --- Couche 0 : verrouillage temporaire apres trop d'echecs (persistant) ---
+    ip = adresse_ip(request)
+    ip_courante.set(ip)
+    attente = await run_in_threadpool(verrouillage, email, ip)
+    if attente:
+        journaliser("connexion_bloquee", gravite="avertissement", succes=False, email=email,
+                    request=request, details={"raison": "trop_de_tentatives"})
+        minutes = max(1, -(-attente // 60))
+        return JSONResponse(status_code=429, headers={"Retry-After": str(attente)}, content={
+            "message": "Trop de tentatives échouées. Réessayez dans {} minute(s).".format(minutes),
+            "requiresCaptcha": True,
+            "requiresRecaptcha": False,
+        })
+
+    etat = await run_in_threadpool(etat_protection, email)
 
     # --- Couche 1 : après 2 échecs, le captcha local devient obligatoire ---
     if etat["protection_active"]:

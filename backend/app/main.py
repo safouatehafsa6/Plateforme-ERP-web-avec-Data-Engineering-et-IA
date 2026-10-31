@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.db import pool_central
 from app.security.appareils import AppareilRefuse, assurer_schema as assurer_schema_appareils
+from app.security.tentatives import assurer_schema as assurer_schema_tentatives
 from fastapi.responses import JSONResponse
 from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, appareils, suggestions, notifications, support, public, calculs, idp, outils
 
@@ -118,6 +119,7 @@ def preparer_securite():
     verifier_configuration()
     assurer_index_sessions()
     assurer_schema_appareils()
+    assurer_schema_tentatives()
 
 
 @app.get("/api/health")

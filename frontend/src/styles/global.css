@@ -1013,6 +1013,66 @@ a {
   font-size: 0.9rem;
 }
 
+/* Accès direct au pipeline Data Engineering depuis le tableau de bord principal. */
+.dashboard-data-access {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--paper-line);
+  border-radius: 10px;
+  background: var(--carte-fond);
+}
+.dashboard-data-access__icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--teal);
+  background: color-mix(in srgb, var(--teal) 12%, transparent);
+}
+.dashboard-data-access__content { flex: 1; min-width: 0; }
+.dashboard-data-access__eyebrow {
+  color: var(--teal);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+.dashboard-data-access__content h2 {
+  margin: 0.2rem 0 0.35rem;
+  color: var(--text-dark);
+  font-size: 1.05rem;
+}
+.dashboard-data-access__content p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.dashboard-data-access__link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  flex: 0 0 auto;
+  padding: 0.7rem 0.9rem;
+  border-radius: 8px;
+  background: var(--brass);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+.dashboard-data-access__link:hover { background: var(--brass-dark); }
+@media (max-width: 680px) {
+  .dashboard-data-access { align-items: flex-start; flex-wrap: wrap; }
+  .dashboard-data-access__content { flex-basis: calc(100% - 64px); }
+  .dashboard-data-access__link { width: 100%; }
+}
+
 /* ---- Indicateur de force du mot de passe ---- */
 .force-mdp {
   display: flex;

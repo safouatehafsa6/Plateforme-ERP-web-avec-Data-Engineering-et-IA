@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+
+INVITATION_HEURES = 48  # durée de validité d'une invitation
 
 
 class RoomManager:
@@ -34,7 +37,8 @@ class RoomManager:
             "id": room_id, "name": name, "description": description,
             "is_private": is_private, "tenant": self.tenant(user),
             "owner_id": uid, "owner_email": user.get("email"),
-            "created_at": now, "invited_emails": set(),
+            "created_at": now, "invited_emails": set(), "invite_expiry": {},
+            "last_summary": None,
             "participants": {uid: {
                 "user_id": uid, "email": user.get("email"), "role": "host",
                 "joined_at": now, "blocked": False,
@@ -54,13 +58,34 @@ class RoomManager:
             "participant_count": len(room["participants"]),
         }
 
+    def invite(self, room: dict, email: str, heures: int = INVITATION_HEURES) -> datetime:
+        """Enregistre une invitation avec date d'expiration."""
+        email = email.strip().lower()
+        expire = datetime.now(timezone.utc) + timedelta(hours=heures)
+        room["invited_emails"].add(email)
+        room.setdefault("invite_expiry", {})[email] = expire
+        return expire
+
+    @staticmethod
+    def is_invited(room: dict, email: str) -> bool:
+        """Vrai si l'e-mail a une invitation non expirée (l'expirée est purgée)."""
+        email = (email or "").lower()
+        if email not in room["invited_emails"]:
+            return False
+        expire = room.get("invite_expiry", {}).get(email)
+        if expire and expire < datetime.now(timezone.utc):
+            room["invited_emails"].discard(email)
+            room["invite_expiry"].pop(email, None)
+            return False
+        return True
+
     def get_accessible(self, user: dict, room_id: str, require_member: bool = False):
         room = self.rooms.get(room_id)
         if not room or room["tenant"] != self.tenant(user):
             return None
         uid, email = self.user_id(user), (user.get("email") or "").lower()
         participant = room["participants"].get(uid)
-        invited = email in room["invited_emails"]
+        invited = self.is_invited(room, email)
         if room["is_private"] and not participant and not invited:
             return None
         if require_member and not participant:
@@ -81,6 +106,7 @@ class RoomManager:
                     "joined_at": datetime.now(timezone.utc).isoformat(), "blocked": False,
                 }
             room["invited_emails"].discard((user.get("email") or "").lower())
+            room.get("invite_expiry", {}).pop((user.get("email") or "").lower(), None)
             return self.public_room(room)
 
     async def leave(self, room_id: str, uid: str):

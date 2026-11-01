@@ -23,6 +23,7 @@ export const joinRoom = (id) => request(`/rooms/${id}/join`, { method: "POST" })
 export const inviteRoom = (id, email) => request(`/rooms/${id}/invite`, {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }),
 });
+export const summarizeRoom = (id) => request(`/rooms/${id}/summary`, { method: "POST" });
 export const removeParticipant = (id, uid, action = "remove") => request(
   `/rooms/${id}/participants/${encodeURIComponent(uid)}/${action === "block" ? "block" : "remove"}`,
   { method: "POST" },

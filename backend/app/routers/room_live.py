@@ -1,5 +1,9 @@
 """API Room Live : salles temporaires, invitations, fichiers et WebSocket."""
+import asyncio
+import logging
 import os
+import re
+import time
 import jwt
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, WebSocket, WebSocketDisconnect, Request
@@ -11,6 +15,17 @@ from app.security.auth_dependency import utilisateur_connecte
 from app.security.sessions import verifier_session
 from app.schemas.room_live import RoomCreate, RoomInvite
 from app.services.room_manager import room_manager
+from app.services.room_summary import resumer
+from app.utils.email_sender import envoyer_email
+
+logger = logging.getLogger("erp.room_live")
+
+# URL publique du frontend, utilisée pour le lien d'accès dans les e-mails
+# d'invitation. Définie côté serveur (jamais lue depuis la requête) pour
+# qu'un hôte ne puisse pas faire envoyer un lien vers un autre site.
+FRONTEND_PUBLIC_URL = os.getenv("FRONTEND_PUBLIC_URL", "http://192.168.244.130:3000").rstrip("/")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+DELAI_RESUME_SECONDES = 20  # anti-abus : limite les appels répétés au LLM
 
 router = APIRouter(prefix="/api/room-live", tags=["room-live"])
 
@@ -66,8 +81,55 @@ async def invite_room(room_id: str, payload: RoomInvite, user: dict = Depends(ut
     room = _require_room(user, room_id, member=True)
     _require_host(user, room)
     email = payload.email.strip().lower()
-    room["invited_emails"].add(email)
-    return {"message": "Invitation enregistrée. Le participant pourra rejoindre avec son compte de la même entreprise."}
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=400, detail="Adresse e-mail invalide.")
+    expire = room_manager.invite(room, email)
+
+    nom_salle = re.sub(r"[\r\n]+", " ", room["name"]).strip()
+    lien = f"{FRONTEND_PUBLIC_URL}/room-live?room={room_id}"
+    corps = (
+        f"Bonjour,\n\n"
+        f"{user.get('email')} vous invite à rejoindre la salle Room Live « {nom_salle} ».\n\n"
+        f"Lien d'accès : {lien}\n\n"
+        f"Connectez-vous avec votre compte de la même entreprise pour entrer dans la salle.\n"
+        f"Cette invitation expire le {expire.strftime('%d/%m/%Y à %H:%M')} (UTC).\n\n"
+        f"— BENJEDDOU ERP"
+    )
+    try:
+        # smtplib est bloquant : exécuté hors de la boucle asynchrone.
+        await asyncio.to_thread(envoyer_email, email, f"Invitation Room Live : {nom_salle}", corps)
+        envoye = True
+    except Exception:
+        logger.exception("Envoi de l'invitation Room Live impossible")
+        envoye = False
+
+    return {
+        "email_sent": envoye,
+        "expires_at": expire.isoformat(),
+        "link": lien,
+        "message": (
+            f"Invitation envoyée à {email} (valable 48 h)."
+            if envoye else
+            "Invitation enregistrée (valable 48 h), mais l'e-mail n'a pas pu être envoyé : partagez le lien manuellement."
+        ),
+    }
+
+
+@router.post("/rooms/{room_id}/summary")
+async def summarize_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
+    """Résumé de la réunion à partir des messages de la salle (membres uniquement)."""
+    room = _require_room(user, room_id, member=True)
+
+    dernier = room.get("last_summary")
+    if dernier and time.monotonic() - dernier["at"] < DELAI_RESUME_SECONDES \
+            and dernier["message_count"] == len(room["messages"]):
+        return {**dernier["result"], "cached": True}
+
+    participants = [p.get("email") or "" for p in room["participants"].values()]
+    messages = list(room["messages"])
+    resultat = await asyncio.to_thread(resumer, room["name"], participants, messages)
+    room["last_summary"] = {"at": time.monotonic(), "message_count": len(messages), "result": resultat}
+    return {**resultat, "cached": False}
 
 
 @router.post("/rooms/{room_id}/participants/{participant_id}/remove")

@@ -3,11 +3,11 @@ import { useTranslation } from "react-i18next";
 import {
   Video, VideoOff, Mic, MicOff, MonitorUp, MonitorOff, PhoneOff,
   Plus, Users, MessageCircle, Paperclip, Lock, Globe, Send, UserPlus,
-  Ban, X, Copy, Download, RefreshCw,
+  Ban, X, Copy, Download, RefreshCw, Sparkles,
 } from "lucide-react";
 import {
   listRooms, createRoom, joinRoom, inviteRoom, removeParticipant,
-  leaveRoom, shareFile, roomWebSocketUrl, downloadSharedFile,
+  leaveRoom, shareFile, roomWebSocketUrl, downloadSharedFile, summarizeRoom,
 } from "../api/roomLiveApi";
 import "./room-live.css";
 
@@ -32,6 +32,8 @@ export default function RoomLive() {
   const [sharing, setSharing] = useState(false);
   const [remoteStreams, setRemoteStreams] = useState({});
   const [activeTab, setActiveTab] = useState("chat");
+  const [summary, setSummary] = useState(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
   const localVideo = useRef(null);
   const localStream = useRef(null);
   const screenStream = useRef(null);
@@ -312,10 +314,17 @@ export default function RoomLive() {
   async function handleInvite(e) {
     e.preventDefault();
     try {
-      await inviteRoom(room.id, inviteEmail);
+      const result = await inviteRoom(room.id, inviteEmail);
       setInviteEmail("");
-      setError("Invitation enregistrée.");
+      setError(result.message || "Invitation enregistrée.");
     } catch (err) { setError(err.message); }
+  }
+
+  async function handleSummary() {
+    setSummaryBusy(true);
+    try { setSummary(await summarizeRoom(room.id)); }
+    catch (e) { setError(e.message); }
+    finally { setSummaryBusy(false); }
   }
 
   async function moderate(id, action) {
@@ -385,6 +394,7 @@ export default function RoomLive() {
               <button className={activeTab === "chat" ? "active" : ""} onClick={() => setActiveTab("chat")}><MessageCircle size={16}/> {t("rl_chat")}</button>
               <button className={activeTab === "people" ? "active" : ""} onClick={() => setActiveTab("people")}><Users size={16}/> {t("rl_people")} ({participants.length})</button>
               <button className={activeTab === "files" ? "active" : ""} onClick={() => setActiveTab("files")}><Paperclip size={16}/> {t("rl_files")}</button>
+              <button className={activeTab === "summary" ? "active" : ""} onClick={() => setActiveTab("summary")}><Sparkles size={16}/> Résumé</button>
             </div>
             {activeTab === "chat" && <><div className="rl-chat-list">{chat.map((m) => <div className="rl-message" key={m.id}><strong>{m.sender || "Utilisateur"}</strong><p>{m.content}</p><time>{m.created_at ? new Date(m.created_at).toLocaleTimeString() : ""}</time></div>)}</div>
               <form className="rl-chat-form" onSubmit={sendChat}><input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={t("rl_write")} maxLength={4000}/><button aria-label="Envoyer"><Send size={17}/></button></form></>}
@@ -392,6 +402,17 @@ export default function RoomLive() {
               <form className="rl-invite-form" onSubmit={handleInvite}><input type="email" required value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="email@entreprise.com"/><button aria-label="Inviter"><UserPlus size={17}/></button></form>
               {participants.map((p) => <div className="rl-person" key={p.user_id}><span className="rl-avatar">{(p.email || "?")[0].toUpperCase()}</span><div><strong>{p.email}</strong><small>{p.role === "host" ? t("rl_host") : t("rl_member")}</small></div>
                 {p.role !== "host" && <div className="rl-person-actions"><button title="Bloquer" onClick={() => moderate(p.user_id, "block")}><Ban size={15}/></button><button title="Retirer" onClick={() => moderate(p.user_id, "remove")}><X size={15}/></button></div>}</div>)}
+            </div>}
+            {activeTab === "summary" && <div className="rl-summary">
+              <button className="rl-primary" onClick={handleSummary} disabled={summaryBusy}>
+                <Sparkles size={16}/> {summaryBusy ? "Génération…" : "Résumer la réunion"}
+              </button>
+              {summary && <>
+                <small>{summary.message_count} message(s) analysé(s) · {summary.mode === "ia" ? "rédigé par l'IA" : "résumé automatique simplifié"}</small>
+                {summary.note && <small>{summary.note}</small>}
+                <pre className="rl-summary-text">{summary.summary}</pre>
+                <button type="button" className="rl-secondary" onClick={() => navigator.clipboard?.writeText(summary.summary)}><Copy size={15}/> Copier</button>
+              </>}
             </div>}
             {activeTab === "files" && <div className="rl-files"><label className="rl-upload"><Paperclip size={17}/> {t("rl_share_file")}<input type="file" onChange={handleFile}/></label>
               {files.map((f, i) => <div className="rl-file" key={`${f.id}-${i}`}><Paperclip size={16}/><span>{f.name}</span><button type="button" onClick={() => handleDownload(f)} title={t("rl_download")}><Download size={16}/></button></div>)}</div>}

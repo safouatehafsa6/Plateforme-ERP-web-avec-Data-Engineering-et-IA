@@ -43,3 +43,4 @@
 @media(max-width:1000px){.rl-workspace{grid-template-columns:1fr}.rl-side-panel{min-height:420px}.rl-lobby{grid-template-columns:1fr}}
 @media(max-width:600px){.room-live-page{padding:20px 12px 32px}.room-live-heading{align-items:flex-start}.room-live-heading h1{font-size:25px}.rl-panel{padding:16px}.rl-main-panel{padding:12px}.rl-room-top{align-items:flex-start;flex-direction:column}.rl-video-grid{grid-template-columns:1fr}.rl-video-grid{min-height:220px}.rl-tabs button{font-size:10px;flex-direction:column}}
 \n.rl-file button{border:0;background:transparent;color:inherit;cursor:pointer;display:grid;place-items:center;padding:4px}\n
+.rl-summary{padding:14px;display:grid;align-content:start;gap:10px}.rl-summary small{color:var(--text-secondary,#64748b)}.rl-summary-text{white-space:pre-wrap;word-break:break-word;font:inherit;font-size:13px;line-height:1.5;background:var(--bg-secondary,#f1f5f9);border-radius:8px;padding:12px;margin:0;max-height:340px;overflow:auto}

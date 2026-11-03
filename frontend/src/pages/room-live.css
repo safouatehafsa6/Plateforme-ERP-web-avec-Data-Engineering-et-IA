@@ -44,3 +44,22 @@
 @media(max-width:600px){.room-live-page{padding:20px 12px 32px}.room-live-heading{align-items:flex-start}.room-live-heading h1{font-size:25px}.rl-panel{padding:16px}.rl-main-panel{padding:12px}.rl-room-top{align-items:flex-start;flex-direction:column}.rl-video-grid{grid-template-columns:1fr}.rl-video-grid{min-height:220px}.rl-tabs button{font-size:10px;flex-direction:column}}
 \n.rl-file button{border:0;background:transparent;color:inherit;cursor:pointer;display:grid;place-items:center;padding:4px}\n
 .rl-summary{padding:14px;display:grid;align-content:start;gap:10px}.rl-summary small{color:var(--text-secondary,#64748b)}.rl-summary-text{white-space:pre-wrap;word-break:break-word;font:inherit;font-size:13px;line-height:1.5;background:var(--bg-secondary,#f1f5f9);border-radius:8px;padding:12px;margin:0;max-height:340px;overflow:auto}
+
+/* Room Live — commandes personnalisables et gestion professionnelle */
+.rl-room-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rl-danger-outline{border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:9px;padding:10px 12px;font-weight:650;cursor:pointer}
+.rl-warning{margin:0 0 14px;padding:10px 12px;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;border-radius:9px;font-size:12px;line-height:1.5}
+.rl-controls{display:flex;justify-content:center;align-items:center;gap:10px;padding:20px 0 4px;flex-wrap:wrap}
+.rl-controls button{width:48px;height:48px;border-radius:17px;border:1px solid #dbe3ed;background:#f8fafc;color:#1e293b;display:grid;place-items:center;cursor:pointer;box-shadow:0 5px 14px #0f172a12;transition:transform .16s ease,box-shadow .16s ease}
+.rl-controls button:hover{transform:translateY(-2px);box-shadow:0 8px 18px #0f172a1c}
+.rl-controls button.is-off{background:#fee2e2;color:#b91c1c;border-color:#fecaca}
+.rl-controls button.is-active{background:#dbeafe;color:#1d4ed8;border-color:#bfdbfe}
+.rl-controls button.rl-hangup{background:#dc2626;color:#fff;border-color:#dc2626;border-radius:50%}
+.rl-controls button.rl-customize-bubble{background:#eef2ff;color:#4338ca;border-color:#c7d2fe}
+.rl-bubble-settings{max-width:440px;margin:8px auto 4px;padding:15px 17px;background:var(--card-bg,#fff);border:1px solid var(--border-color,#e2e8f0);border-radius:14px;box-shadow:0 12px 30px #0f172a12;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}
+.rl-bubble-settings strong,.rl-bubble-settings p,.rl-bubble-settings>button{grid-column:1/-1}
+.rl-bubble-settings p{margin:-7px 0 2px;color:var(--text-secondary,#64748b);font-size:12px}
+.rl-bubble-settings label{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+.rl-person-actions select{max-width:120px;border:1px solid var(--border-color,#dbe1e8);border-radius:7px;padding:5px;background:var(--input-bg,#fff);color:inherit;font-size:11px}
+@media(max-width:600px){.rl-room-actions{width:100%}.rl-room-actions button{flex:1;font-size:11px}.rl-controls{gap:8px}.rl-controls button{width:44px;height:44px;border-radius:14px}.rl-bubble-settings{margin-left:0;margin-right:0}}
+.rl-readonly-note{margin:10px 14px;padding:10px 12px;border-radius:8px;background:var(--surface,#f1f5f9);color:var(--text-secondary,#64748b);font-size:12px}

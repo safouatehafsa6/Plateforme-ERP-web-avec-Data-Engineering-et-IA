@@ -20,6 +20,10 @@ export const createRoom = (payload) => request("/rooms", {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
 });
 export const joinRoom = (id) => request(`/rooms/${id}/join`, { method: "POST" });
+export const updateRoom = (id, payload) => request(`/rooms/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+export const closeRoom = (id) => request(`/rooms/${id}`, { method: "DELETE" });
+export const revokeInvitation = (id, email) => request(`/rooms/${id}/invitations/${encodeURIComponent(email)}`, { method: "DELETE" });
+export const updateParticipantRole = (id, uid, role) => request(`/rooms/${id}/participants/${encodeURIComponent(uid)}/role`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role }) });
 export const inviteRoom = (id, email) => request(`/rooms/${id}/invite`, {
   method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }),
 });

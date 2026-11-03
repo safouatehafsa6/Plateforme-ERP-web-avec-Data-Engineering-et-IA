@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 from app.security.auth_dependency import utilisateur_connecte
 from app.security.sessions import verifier_session
-from app.schemas.room_live import RoomCreate, RoomInvite
+from app.schemas.room_live import RoomCreate, RoomInvite, RoomUpdate, ParticipantRoleUpdate
 from app.services.room_manager import room_manager
 from app.services.room_summary import resumer
 from app.utils.email_sender import envoyer_email
@@ -43,7 +43,11 @@ def _require_room(user, room_id, member=False):
 
 def _require_host(user, room):
     if room["owner_id"] != _uid(user):
-        raise HTTPException(status_code=403, detail="Seul le créateur de la salle peut effectuer cette action.")
+        raise HTTPException(status_code=403, detail="Action réservée à l'hôte de la salle.")
+
+def _require_manager(user, room):
+    if not room_manager.can_manage(user, room):
+        raise HTTPException(status_code=403, detail="Action réservée à l'hôte ou au co-hôte.")
 
 
 @router.get("/rooms")
@@ -79,7 +83,7 @@ async def join_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
 @router.post("/rooms/{room_id}/invite")
 async def invite_room(room_id: str, payload: RoomInvite, user: dict = Depends(utilisateur_connecte)):
     room = _require_room(user, room_id, member=True)
-    _require_host(user, room)
+    _require_manager(user, room)
     email = payload.email.strip().lower()
     if not _EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Adresse e-mail invalide.")
@@ -115,6 +119,63 @@ async def invite_room(room_id: str, payload: RoomInvite, user: dict = Depends(ut
     }
 
 
+@router.patch("/rooms/{room_id}")
+async def update_room(room_id: str, payload: RoomUpdate, user: dict = Depends(utilisateur_connecte)):
+    room = _require_room(user, room_id, member=True)
+    _require_host(user, room)
+    changes = payload.model_dump(exclude_unset=True)
+    if "name" in changes:
+        room["name"] = changes["name"].strip()
+    if "description" in changes:
+        room["description"] = changes["description"].strip()
+    if "is_private" in changes:
+        room["is_private"] = changes["is_private"]
+    public = room_manager.public_room(room)
+    await room_manager.broadcast(room_id, {"type": "room_updated", "room": public})
+    return {"room": public}
+
+
+@router.delete("/rooms/{room_id}")
+async def close_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
+    room = _require_room(user, room_id, member=True)
+    _require_host(user, room)
+    await room_manager.broadcast(room_id, {"type": "room_closed", "room_id": room_id})
+    for socket in list(room_manager.connections.get(room_id, {}).values()):
+        try:
+            await socket.close(code=4000, reason="Salle fermée par l'hôte")
+        except Exception:
+            pass
+    room_manager.rooms.pop(room_id, None)
+    room_manager.connections.pop(room_id, None)
+    for file_id in [fid for fid, item in room_manager.files.items() if item["room_id"] == room_id]:
+        room_manager.files.pop(file_id, None)
+    return {"message": "Salle fermée."}
+
+
+@router.delete("/rooms/{room_id}/invitations/{email}")
+async def revoke_invitation(room_id: str, email: str, user: dict = Depends(utilisateur_connecte)):
+    room = _require_room(user, room_id, member=True)
+    _require_manager(user, room)
+    normalized = email.strip().lower()
+    room["invited_emails"].discard(normalized)
+    room.get("invite_expiry", {}).pop(normalized, None)
+    return {"message": "Invitation révoquée."}
+
+
+@router.patch("/rooms/{room_id}/participants/{participant_id}/role")
+async def update_participant_role(room_id: str, participant_id: str, payload: ParticipantRoleUpdate, user: dict = Depends(utilisateur_connecte)):
+    room = _require_room(user, room_id, member=True)
+    _require_host(user, room)
+    participant = room["participants"].get(participant_id)
+    if not participant or participant_id == room["owner_id"]:
+        raise HTTPException(status_code=404, detail="Participant introuvable.")
+    if participant.get("role") == "cohost" and payload.role == "cohost":
+        return {"room": room_manager.public_room(room)}
+    public = await room_manager.update_participant_role(room_id, participant_id, payload.role)
+    await room_manager.broadcast(room_id, {"type": "participants", "room": public})
+    return {"room": public}
+
+
 @router.post("/rooms/{room_id}/summary")
 async def summarize_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
     """Résumé de la réunion à partir des messages de la salle (membres uniquement)."""
@@ -135,9 +196,11 @@ async def summarize_room(room_id: str, user: dict = Depends(utilisateur_connecte
 @router.post("/rooms/{room_id}/participants/{participant_id}/remove")
 async def remove_participant(room_id: str, participant_id: str, user: dict = Depends(utilisateur_connecte)):
     room = _require_room(user, room_id, member=True)
-    _require_host(user, room)
+    _require_manager(user, room)
     if participant_id == room["owner_id"]:
         raise HTTPException(status_code=400, detail="Le créateur ne peut pas être retiré de sa propre salle.")
+    if room["participants"].get(participant_id, {}).get("role") == "cohost" and room["owner_id"] != _uid(user):
+        raise HTTPException(status_code=403, detail="Un co-hôte ne peut pas retirer un autre co-hôte.")
     room["participants"].pop(participant_id, None)
     socket = room_manager.connections.get(room_id, {}).pop(participant_id, None)
     if socket:
@@ -153,10 +216,12 @@ async def remove_participant(room_id: str, participant_id: str, user: dict = Dep
 @router.post("/rooms/{room_id}/participants/{participant_id}/block")
 async def block_participant(room_id: str, participant_id: str, user: dict = Depends(utilisateur_connecte)):
     room = _require_room(user, room_id, member=True)
-    _require_host(user, room)
+    _require_manager(user, room)
     participant = room["participants"].get(participant_id)
     if not participant or participant_id == room["owner_id"]:
         raise HTTPException(status_code=404, detail="Participant introuvable.")
+    if participant.get("role") == "cohost" and room["owner_id"] != _uid(user):
+        raise HTTPException(status_code=403, detail="Un co-hôte ne peut pas bloquer un autre co-hôte.")
     participant["blocked"] = True
     socket = room_manager.connections.get(room_id, {}).pop(participant_id, None)
     if socket:
@@ -184,6 +249,8 @@ async def leave_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
 @router.post("/rooms/{room_id}/files")
 async def upload_file(room_id: str, file: UploadFile = File(...), user: dict = Depends(utilisateur_connecte)):
     room = _require_room(user, room_id, member=True)
+    if room["participants"].get(_uid(user), {}).get("role") == "observer":
+        raise HTTPException(status_code=403, detail="Le mode observateur ne permet pas de partager des fichiers.")
     content = await file.read(15 * 1024 * 1024 + 1)
     if len(content) > 15 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Fichier limité à 15 Mo.")
@@ -249,6 +316,9 @@ async def room_websocket(websocket: WebSocket, room_id: str, token: str = ""):
                 break
             kind = data.get("type")
             if kind == "chat":
+                if room["participants"].get(uid, {}).get("role") == "observer":
+                    await websocket.send_json({"type": "error", "message": "Le mode observateur ne permet pas d'envoyer des messages."})
+                    continue
                 content = str(data.get("content", "")).strip()[:4000]
                 if not content:
                     continue
@@ -261,7 +331,11 @@ async def room_websocket(websocket: WebSocket, room_id: str, token: str = ""):
                 room["messages"] = room["messages"][-200:]
                 await room_manager.broadcast(room_id, {"type": "chat", "message": message})
             elif kind in ("offer", "answer", "ice-candidate"):
+                if kind == "offer" and room["participants"].get(uid, {}).get("role") == "observer":
+                    continue
                 target = str(data.get("target_user_id", ""))
+                if target == uid or target not in room["participants"]:
+                    continue
                 if target in room_manager.connections.get(room_id, {}):
                     await room_manager.connections[room_id][target].send_json({
                         "type": kind, "from_user_id": uid, "payload": data.get("payload", {}),

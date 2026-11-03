@@ -49,6 +49,11 @@ class RoomManager:
             self.rooms[room_id] = room
         return self.public_room(room)
 
+    @staticmethod
+    def can_manage(user: dict, room: dict) -> bool:
+        participant = room["participants"].get(RoomManager.user_id(user), {})
+        return room["owner_id"] == RoomManager.user_id(user) or participant.get("role") == "cohost"
+
     def public_room(self, room):
         return {
             "id": room["id"], "name": room["name"], "description": room["description"],
@@ -107,6 +112,16 @@ class RoomManager:
                 }
             room["invited_emails"].discard((user.get("email") or "").lower())
             room.get("invite_expiry", {}).pop((user.get("email") or "").lower(), None)
+            return self.public_room(room)
+
+    async def update_participant_role(self, room_id: str, participant_id: str, role: str):
+        async with self.lock:
+            room = self.rooms.get(room_id)
+            if not room or participant_id not in room["participants"]:
+                return None
+            if participant_id == room["owner_id"]:
+                return None
+            room["participants"][participant_id]["role"] = role
             return self.public_room(room)
 
     async def leave(self, room_id: str, uid: str):

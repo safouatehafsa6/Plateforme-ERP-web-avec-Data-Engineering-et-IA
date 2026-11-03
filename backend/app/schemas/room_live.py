@@ -20,3 +20,13 @@ class RoomSignal(BaseModel):
     target_user_id: str
     signal_type: str = Field(pattern="^(offer|answer|ice-candidate)$")
     payload: dict
+
+
+class RoomUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    description: Optional[str] = Field(default=None, max_length=500)
+    is_private: Optional[bool] = None
+
+
+class ParticipantRoleUpdate(BaseModel):
+    role: str = Field(pattern="^(cohost|member|observer)$")

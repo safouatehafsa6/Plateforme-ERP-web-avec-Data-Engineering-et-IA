@@ -4,7 +4,7 @@ FROM apache/airflow:2.9.3
 
 USER root
 
-RUN apt-get update && apt-get install -y --no-install-recommends default-jre-headless procps curl && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=spark /opt/java/openjdk /opt/java/openjdk
 
 COPY --from=spark /opt/spark /opt/spark
 
@@ -15,9 +15,9 @@ RUN curl -fSL -o /opt/spark/jars/hadoop-aws-3.3.4.jar https://repo1.maven.org/ma
  && curl -fSL -o /opt/spark/jars/postgresql-42.7.4.jar https://jdbc.postgresql.org/download/postgresql-42.7.4.jar \
  && chown -R airflow:root /opt/spark
 
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/opt/java/openjdk
 ENV SPARK_HOME=/opt/spark
-ENV PATH=/home/airflow/.local/bin:/usr/lib/jvm/java-17-openjdk-amd64/bin:/usr/local/bin:/usr/bin:/bin
+ENV PATH=/home/airflow/.local/bin:/opt/java/openjdk/bin:/usr/local/bin:/usr/bin:/bin
 
 USER airflow
 

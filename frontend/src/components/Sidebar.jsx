@@ -2,10 +2,10 @@ import { useLocation, Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
   LayoutDashboard, ShoppingCart, Truck, Boxes, Users,
-  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot, Activity, Monitor, Calculator,
+  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot, Activity, Monitor, Calculator, Video,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { lireSession, estAdminEntreprise, estSuperAdmin } from "../api/session";
+import { lireSession, estAdminEntreprise, estSuperAdmin, estProfilEntreprise } from "../api/session";
 import { deconnecter } from "../api/sessionsApi";
 import AssistantIA from "./AssistantIA";
 
@@ -19,14 +19,15 @@ import AssistantIA from "./AssistantIA";
 const ITEMS = [
   { icon: LayoutDashboard, label: "tableau_de_bord", chemin: "/dashboard" },
   { icon: Activity, label: "dashboard_data", chemin: "/dashboard-data", visible: estAdminEntreprise },
-  { icon: ShoppingCart, label: "ventes", chemin: "/ventes" },
-  { icon: Truck, label: "achats", chemin: "/achats" },
-  { icon: Truck, label: "fournisseurs", chemin: "/fournisseurs" },
-  { icon: Boxes, label: "stock", chemin: "/stock" },
-  { icon: Users, label: "clients", chemin: "/clients" },
-  { icon: FileText, label: "facturation", chemin: "/facturation" },
-  { icon: Wallet, label: "comptabilite", chemin: "/comptabilite" },
-  { icon: Calculator, label: "calculs", chemin: "/calculs" },
+  { icon: ShoppingCart, label: "ventes", chemin: "/ventes", visible: estProfilEntreprise },
+  { icon: Truck, label: "achats", chemin: "/achats", visible: estProfilEntreprise },
+  { icon: Truck, label: "fournisseurs", chemin: "/fournisseurs", visible: estProfilEntreprise },
+  { icon: Boxes, label: "stock", chemin: "/stock", visible: estProfilEntreprise },
+  { icon: Users, label: "clients", chemin: "/clients", visible: estProfilEntreprise },
+  { icon: FileText, label: "facturation", chemin: "/facturation", visible: estProfilEntreprise },
+  { icon: Wallet, label: "comptabilite", chemin: "/comptabilite", visible: estProfilEntreprise },
+  { icon: Calculator, label: "calculs", chemin: "/calculs", visible: estProfilEntreprise },
+  { icon: Video, label: "room_live", chemin: "/room-live", visible: estProfilEntreprise },
   { icon: UserCog, label: "collaborateurs_titre", chemin: "/collaborateurs", visible: estAdminEntreprise },
   { icon: ShieldCheck, label: "roles_permissions_titre", chemin: "/roles-permissions", visible: estAdminEntreprise },
   { icon: Contact, label: "utilisateurs_externes_titre", chemin: "/utilisateurs-externes", visible: estAdminEntreprise },

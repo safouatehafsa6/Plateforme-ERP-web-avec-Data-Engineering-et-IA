@@ -42,3 +42,10 @@ export function estUtilisateurExterne(session) {
 export function estSuperAdmin(session) {
   return Boolean(session && session.role === "super_admin");
 }
+
+
+// Profil lié à une entreprise (interne ou externe) : le Super Admin de la
+// plateforme n'a pas de base entreprise, donc pas de modules métier.
+export function estProfilEntreprise(session) {
+  return Boolean(session && session.nomBase && session.role !== "super_admin");
+}

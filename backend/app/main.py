@@ -10,7 +10,7 @@ from app.db import pool_central
 from app.security.appareils import AppareilRefuse, assurer_schema as assurer_schema_appareils
 from app.security.tentatives import assurer_schema as assurer_schema_tentatives
 from fastapi.responses import JSONResponse
-from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, appareils, suggestions, notifications, support, public, calculs, idp, outils
+from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, appareils, suggestions, notifications, support, public, calculs, idp, outils, room_live
 
 app = FastAPI(title="ERP Backend", version="0.1.0")
 
@@ -71,6 +71,7 @@ app.include_router(public.router)
 app.include_router(calculs.router)
 app.include_router(idp.router)
 app.include_router(outils.router)
+app.include_router(room_live.router)
 
 
 @app.on_event("startup")

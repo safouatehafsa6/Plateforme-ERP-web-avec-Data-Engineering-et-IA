@@ -1,10 +1,14 @@
 import { useTranslation } from "react-i18next";
-import { Search, Bell } from "lucide-react";
+import { Search, Bell, Activity, ArrowUpRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { lireSession, estAdminEntreprise } from "../api/session";
 import Sidebar from "../components/Sidebar";
 import KpiCard from "../components/KpiCard";
 
 export default function TableauDeBord() {
   const { t } = useTranslation();
+  const session = lireSession();
+  const afficherDataEngineering = estAdminEntreprise(session);
 
   return (
     <div className="app-layout">
@@ -31,6 +35,23 @@ export default function TableauDeBord() {
             <KpiCard label={t("tresorerie")} valeur="632 250 MAD" variation="3,7%" positif={false} />
             <KpiCard label={t("clients_actifs")} valeur="152" variation="6,2%" positif />
           </div>
+
+          {afficherDataEngineering && (
+            <section className="dashboard-data-access" aria-labelledby="dashboard-data-title">
+              <div className="dashboard-data-access__icon"><Activity size={23} /></div>
+              <div className="dashboard-data-access__content">
+                <span className="dashboard-data-access__eyebrow">DATA ENGINEERING</span>
+                <h2 id="dashboard-data-title">Data Engineering &amp; Analytics</h2>
+                <p>
+                  Lancez le pipeline de données, suivez les étapes de traitement
+                  et consultez les indicateurs analytiques validés de votre entreprise.
+                </p>
+              </div>
+              <Link className="dashboard-data-access__link" to="/dashboard-data">
+                Ouvrir le dashboard <ArrowUpRight size={17} />
+              </Link>
+            </section>
+          )}
 
           <div className="app-placeholder-zone">
             <p>{t("graphiques_a_venir")}</p>

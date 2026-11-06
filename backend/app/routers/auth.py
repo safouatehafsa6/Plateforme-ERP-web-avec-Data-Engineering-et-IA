@@ -1,7 +1,7 @@
 import os
 import bcrypt
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.db import pool_central, get_pool_entreprise
 from app.security.captcha import generer_captcha
@@ -11,21 +11,58 @@ from app.security.protection import (
     etat_protection,
     enregistrer_echec,
     reinitialiser_tentatives,
+    ip_courante,
+    verrouillage,
 )
 from app.security.recaptcha import verifier_recaptcha
 from app.security.validation_inscription import valider_mot_de_passe
 from app.security import password_reset_store as reset_store
-from app.security.sessions import emettre_jeton, revoquer_sessions_par_email
+from app.security.sessions import adresse_ip, emettre_jeton, revoquer_sessions_par_email
 from app.security.audit import journaliser
 from app.utils.email_sender import envoyer_code_reinitialisation
 from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def _abonnement_suspendu(entreprise_id) -> bool:
+    """Vrai si l'abonnement COURANT (le plus recent) de l'entreprise est suspendu.
+    Une entreprise sans abonnement n'est pas bloquee (anciennes bases de test)."""
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT statut FROM abonnement WHERE entreprise_id = %s ORDER BY id DESC LIMIT 1",
+                (entreprise_id,),
+            )
+            ligne = cur.fetchone()
+    finally:
+        pool_central.putconn(conn)
+    return bool(ligne) and ligne[0] == "suspendu"
+
+
+def _refus_si_abonnement_suspendu(entreprise_id, type_compte, email, request):
+    """Appele APRES la verification du mot de passe (aucune fuite d'information
+    sur l'etat de l'entreprise pour un mauvais mot de passe). Renvoie une
+    reponse 403 si l'acces doit etre refuse, sinon None."""
+    if not _abonnement_suspendu(entreprise_id):
+        return None
+    journaliser("connexion_refusee", gravite="avertissement", succes=False,
+                type_compte=type_compte, email=email, entreprise_id=entreprise_id,
+                request=request, details={"raison": "abonnement_suspendu"})
+    return JSONResponse(status_code=403, content={
+        "message": "L'abonnement de cette entreprise est suspendu. Contactez le support de la plateforme.",
+    })
+
+
+# Hash factice : meme cout de calcul pour un email inconnu et un email connu.
+_HASH_FACTICE = bcrypt.hashpw(b"mot-de-passe-factice", bcrypt.gensalt())
+
+
 class LoginPayload(BaseModel):
-    email: str
-    motDePasse: str
+    email: str = Field(max_length=150)
+    motDePasse: str = Field(max_length=72)
     captchaId: str | None = None
     captchaValeur: str | None = None
     recaptchaToken: str | None = None
@@ -35,7 +72,7 @@ class LoginPayload(BaseModel):
 def obtenir_captcha():
     captcha = generer_captcha()
     enregistrer_captcha(captcha["id"], captcha["code"])
-    if os.getenv("ENV", "dev") != "production":
+    if os.getenv("ENV", "production") in ("dev", "development"):
         print(f"[DEV] Captcha {captcha['id']} -> code: {captcha['code']}")
     return {"captchaId": captcha["id"], "svg": captcha["svg"]}
 
@@ -43,7 +80,22 @@ def obtenir_captcha():
 @router.post("/login")
 async def login(payload: LoginPayload, request: Request):
     email = payload.email.strip().lower()
-    etat = etat_protection(email)
+
+    # --- Couche 0 : verrouillage temporaire apres trop d'echecs (persistant) ---
+    ip = adresse_ip(request)
+    ip_courante.set(ip)
+    attente = await run_in_threadpool(verrouillage, email, ip)
+    if attente:
+        journaliser("connexion_bloquee", gravite="avertissement", succes=False, email=email,
+                    request=request, details={"raison": "trop_de_tentatives"})
+        minutes = max(1, -(-attente // 60))
+        return JSONResponse(status_code=429, headers={"Retry-After": str(attente)}, content={
+            "message": "Trop de tentatives échouées. Réessayez dans {} minute(s).".format(minutes),
+            "requiresCaptcha": True,
+            "requiresRecaptcha": False,
+        })
+
+    etat = await run_in_threadpool(etat_protection, email)
 
     # --- Couche 1 : après 2 échecs, le captcha local devient obligatoire ---
     if etat["protection_active"]:
@@ -101,7 +153,8 @@ async def login(payload: LoginPayload, request: Request):
 
     if ligne_super_admin:
         utilisateur_id, nom, email_bd, hash_stocke = ligne_super_admin
-        mot_de_passe_valide = bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+        mot_de_passe_valide = await run_in_threadpool(
+            bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
         if not mot_de_passe_valide:
             journaliser("connexion_echouee", gravite="avertissement", succes=False,
@@ -165,9 +218,13 @@ async def login(payload: LoginPayload, request: Request):
 
             if ligne_externe:
                 utilisateur_id, hash_stocke, actif, client_id, client_nom = ligne_externe
-                mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+                mot_de_passe_valide = actif and await run_in_threadpool(
+                    bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
                 if mot_de_passe_valide:
+                    refus = _refus_si_abonnement_suspendu(entreprise_id, "externe", email, request)
+                    if refus:
+                        return refus
                     reinitialiser_tentatives(email)
                     token = emettre_jeton(
                         {
@@ -202,9 +259,13 @@ async def login(payload: LoginPayload, request: Request):
 
             if ligne_utilisateur:
                 utilisateur_id, nom, prenom, hash_stocke, actif, role_nom = ligne_utilisateur
-                mot_de_passe_valide = actif and bcrypt.checkpw(payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+                mot_de_passe_valide = actif and await run_in_threadpool(
+                    bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
 
                 if mot_de_passe_valide:
+                    refus = _refus_si_abonnement_suspendu(entreprise_id, "interne", email, request)
+                    if refus:
+                        return refus
                     reinitialiser_tentatives(email)
                     token = emettre_jeton(
                         {
@@ -220,6 +281,11 @@ async def login(payload: LoginPayload, request: Request):
                             "role": role_nom, "entrepriseId": entreprise_id,
                         },
                     }
+
+    if not ligne_super_admin and not ligne_index:
+        # Meme cout de calcul qu'un vrai compte : le temps de reponse ne revele
+        # pas si l'adresse email existe.
+        await run_in_threadpool(bcrypt.checkpw, b"mot-de-passe-factice", _HASH_FACTICE)
 
     # Ni super_admin, ni compte d'entreprise valide : même message
     # générique dans tous les cas (anti-énumération).

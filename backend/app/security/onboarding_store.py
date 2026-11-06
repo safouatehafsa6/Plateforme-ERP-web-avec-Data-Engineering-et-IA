@@ -14,6 +14,8 @@ _otp_par_entreprise: dict[int, dict] = {}
 
 _admin_temp_par_entreprise: dict[int, dict] = {}  # entreprise_id -> {"nom", "email", "mot_de_passe_hash"}
 
+_entreprises_email_verifie: set[int] = set()  # entreprises dont l'OTP a ete valide
+
 
 def generer_et_stocker_otp(entreprise_id: int) -> str:
     """Génère un nouveau code et réinitialise le compteur de tentatives.
@@ -61,6 +63,7 @@ def verifier_otp(entreprise_id: int, code_saisi: str) -> tuple[bool, str]:
         return False, "code_incorrect"
 
     _otp_par_entreprise.pop(entreprise_id, None)
+    _entreprises_email_verifie.add(entreprise_id)
     return True, "ok"
 
 
@@ -76,3 +79,8 @@ def recuperer_admin_temporaire(entreprise_id: int) -> dict | None:
 
 def supprimer_admin_temporaire(entreprise_id: int) -> None:
     _admin_temp_par_entreprise.pop(entreprise_id, None)
+
+
+def email_verifie(entreprise_id: int) -> bool:
+    """Vrai seulement si le code OTP de cette entreprise a ete valide."""
+    return entreprise_id in _entreprises_email_verifie

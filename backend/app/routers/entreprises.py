@@ -1,13 +1,18 @@
+import logging
+import os
 import re
 import secrets
 import unicodedata
 import bcrypt
-from datetime import datetime, timezone
-from fastapi import APIRouter
+import jwt
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.security import HTTPBearer
+from pydantic import BaseModel, Field
 
 from app.db import pool_central
+from app.security.jwt_utils import exiger_super_admin, obtenir_utilisateur_courant
 from app.security.captcha import generer_captcha
 from app.security.protection import enregistrer_captcha, verifier_et_consommer_captcha
 from app.security.onboarding_store import (
@@ -18,6 +23,7 @@ from app.security.onboarding_store import (
     stocker_admin_temporaire,
     recuperer_admin_temporaire,
     supprimer_admin_temporaire,
+    email_verifie,
 )
 from app.services.provisioning import provisionner_entreprise
 from app.utils.email_sender import envoyer_code_otp
@@ -25,6 +31,71 @@ from app.utils.email_sender import envoyer_code_otp
 router = APIRouter(prefix="/api/entreprises", tags=["entreprises"])
 
 CGU_VERSION_ACTUELLE = "v1"
+
+_bearer_optionnel = HTTPBearer(auto_error=False)
+
+
+def _auto_validation_active() -> bool:
+    """Mode demonstration / developpement UNIQUEMENT : validation automatique
+    du dossier et activation sans Super Admin. Desactive par defaut ; a ne
+    jamais activer en production (ONBOARDING_AUTO_VALIDATION=1)."""
+    return os.getenv("ONBOARDING_AUTO_VALIDATION", "0") == "1"
+
+
+DUREE_JETON_INSCRIPTION = timedelta(hours=2)
+PLANS_VALIDES = ("essai", "standard", "premium")
+
+
+def _super_admin_optionnel(identifiants=Depends(_bearer_optionnel)):
+    """Super Admin authentifie si un jeton de session est fourni, sinon None.
+    Un jeton de session invalide est refuse (401)."""
+    if identifiants is None:
+        return None
+    utilisateur = obtenir_utilisateur_courant(identifiants)
+    return exiger_super_admin(utilisateur)
+
+
+def _emettre_jeton_inscription(entreprise_id) -> str:
+    """Jeton signe, a duree limitee, delivre APRES validation de l'OTP.
+    Il porte une audience speciale : il est refuse partout ailleurs (jamais
+    accepte comme jeton de session)."""
+    return jwt.encode(
+        {
+            "sub": str(entreprise_id),
+            "scope": "inscription",
+            "aud": "inscription",
+            "exp": datetime.now(timezone.utc) + DUREE_JETON_INSCRIPTION,
+        },
+        os.environ["JWT_SECRET"],
+        algorithm="HS256",
+    )
+
+
+def _exiger_jeton_inscription(entreprise_id, jeton) -> None:
+    """401 si le jeton est absent/invalide/expire, 403 s'il concerne une
+    autre entreprise."""
+    if not jeton:
+        raise HTTPException(status_code=401, detail="Jeton d'inscription manquant. Recommencez la vérification de l'email.")
+    try:
+        charge = jwt.decode(jeton, os.environ["JWT_SECRET"], algorithms=["HS256"], audience="inscription")
+    except (jwt.InvalidTokenError, KeyError):
+        raise HTTPException(status_code=401, detail="Jeton d'inscription invalide ou expiré.")
+    if charge.get("scope") != "inscription" or charge.get("sub") != str(entreprise_id):
+        raise HTTPException(status_code=403, detail="Ce jeton ne correspond pas à cette inscription.")
+
+
+def _plan_est_essai(entreprise_id) -> bool:
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT type_plan FROM abonnement WHERE entreprise_id = %s ORDER BY id DESC LIMIT 1",
+                (entreprise_id,),
+            )
+            ligne = cur.fetchone()
+    finally:
+        pool_central.putconn(conn)
+    return bool(ligne) and ligne[0] == "essai"
 
 # Format email volontairement strict : présence d'un "@", d'un domaine
 # avec au moins un point, et aucun espace (voir demande de l'entreprise,
@@ -81,7 +152,7 @@ def _erreurs_validation_inscription(payload: "InscriptionPayload") -> list[str]:
 
     mdp = payload.motDePasse or ""
     if (
-        len(mdp) < 8
+        len(mdp) < 8 or len(mdp.encode("utf-8")) > 72
         or not REGEX_LETTRE.search(mdp)
         or not REGEX_CHIFFRE.search(mdp)
         or not REGEX_SPECIAL.search(mdp)
@@ -101,18 +172,18 @@ def _erreurs_validation_inscription(payload: "InscriptionPayload") -> list[str]:
 
 # --- Étape 1 : choix du type + inscription ---
 class InscriptionPayload(BaseModel):
-    typeCompte: str  # "personne_physique" | "entreprise"
-    nomEntreprise: str | None = None   # requis si entreprise
-    secteur: str | None = None
-    nomAdmin: str                       # nom complet (personne physique) ou nom du représentant (entreprise)
-    email: str
-    emailConfirmation: str
-    telephone: str | None = None
-    motDePasse: str
-    motDePasseConfirmation: str
+    typeCompte: str = Field(max_length=20)  # "personne_physique" | "entreprise"
+    nomEntreprise: str | None = Field(None, max_length=150)   # requis si entreprise
+    secteur: str | None = Field(None, max_length=100)
+    nomAdmin: str = Field(max_length=150)  # nom complet (personne physique) ou nom du représentant (entreprise)
+    email: str = Field(max_length=150)
+    emailConfirmation: str = Field(max_length=150)
+    telephone: str | None = Field(None, max_length=30)
+    motDePasse: str = Field(max_length=72)
+    motDePasseConfirmation: str = Field(max_length=72)
     cguAccepte: bool
-    captchaId: str
-    captchaValeur: str
+    captchaId: str = Field(max_length=100)
+    captchaValeur: str = Field(max_length=20)
 
 
 @router.get("/captcha")
@@ -145,7 +216,11 @@ def inscription(payload: InscriptionPayload):
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM entreprise WHERE email_contact = %s", (email,))
+            cur.execute(
+                "SELECT 1 FROM entreprise WHERE email_contact = %s "
+                "UNION SELECT 1 FROM compte_index WHERE email = %s",
+                (email, email),
+            )
             if cur.fetchone():
                 return JSONResponse(status_code=409, content={
                     "message": "Une inscription existe déjà avec cette adresse email.",
@@ -156,7 +231,8 @@ def inscription(payload: InscriptionPayload):
     identifiant_unique = secrets.token_hex(4).upper()
 
     nom_pour_base = payload.nomEntreprise if payload.typeCompte == "entreprise" else payload.nomAdmin
-    nom_base = f"compte_{_slugifier(nom_pour_base)}_{identifiant_unique.lower()}"
+    # Slug borne : PostgreSQL tronque les noms de base au-dela de 63 caracteres.
+    nom_base = f"compte_{_slugifier(nom_pour_base)[:40]}_{identifiant_unique.lower()}"
     nom_enregistre = payload.nomEntreprise if payload.typeCompte == "entreprise" else payload.nomAdmin
     secteur = payload.secteur if payload.typeCompte == "entreprise" else None
 
@@ -217,7 +293,10 @@ def verifier_otp_route(payload: OtpPayload):
         }
         return JSONResponse(status_code=400, content={"message": messages.get(raison, "Code invalide."), "raison": raison})
 
-    return {"message": "Vérification réussie."}
+    return {
+        "message": "Vérification réussie.",
+        "jetonInscription": _emettre_jeton_inscription(payload.entrepriseId),
+    }
 
 
 class RenvoiOtpPayload(BaseModel):
@@ -260,16 +339,22 @@ class KycPayload(BaseModel):
 
 
 @router.post("/kyc")
-def soumettre_kyc(payload: KycPayload):
+def soumettre_kyc(payload: KycPayload, jeton: str | None = Header(None, alias="X-Jeton-Inscription")):
+    if not _auto_validation_active():
+        _exiger_jeton_inscription(payload.entrepriseId, jeton)
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT type_compte FROM entreprise WHERE id = %s", (payload.entrepriseId,))
+            cur.execute("SELECT type_compte, statut FROM entreprise WHERE id = %s", (payload.entrepriseId,))
             ligne = cur.fetchone()
             if not ligne:
                 return JSONResponse(status_code=404, content={"message": "Entreprise introuvable."})
 
-            type_compte = ligne[0]
+            type_compte, statut_actuel = ligne
+            if statut_actuel != "en_attente":
+                return JSONResponse(status_code=409, content={
+                    "message": "Ce dossier ne peut plus recevoir de documents.",
+                })
             requis = set(DOCUMENTS_REQUIS[type_compte])
             fournis = set(payload.documents.keys())
             manquants = requis - fournis
@@ -278,10 +363,15 @@ def soumettre_kyc(payload: KycPayload):
                     "message": f"Documents manquants pour ce type de compte : {', '.join(manquants)}.",
                 })
 
+            if fournis - requis:
+                return JSONResponse(status_code=400, content={
+                    "message": "Document non attendu pour ce type de compte.",
+                })
+
             for type_doc, nom_fichier in payload.documents.items():
                 cur.execute(
                     "INSERT INTO document_kyc (entreprise_id, type_document, nom_fichier) VALUES (%s, %s, %s)",
-                    (payload.entrepriseId, type_doc, nom_fichier),
+                    (payload.entrepriseId, type_doc, str(nom_fichier)[:255]),
                 )
         conn.commit()
     finally:
@@ -291,7 +381,8 @@ def soumettre_kyc(payload: KycPayload):
     # (voir /valider et /refuser). Pour permettre de tester le parcours de
     # bout en bout sans interface Super Admin encore construite, on
     # auto-valide ici — à retirer une fois cette interface développée.
-    _valider_dossier(payload.entrepriseId)
+    if _auto_validation_active():
+        _valider_dossier(payload.entrepriseId)
 
     return {"message": "Documents reçus. Votre dossier est en attente de validation."}
 
@@ -302,19 +393,42 @@ class ValidationPayload(BaseModel):
 
 
 @router.post("/valider")
-def valider_dossier_route(payload: ValidationPayload):
-    _valider_dossier(payload.entrepriseId)
+def valider_dossier_route(payload: ValidationPayload, _: dict = Depends(exiger_super_admin)):
+    if not _changer_statut_si(payload.entrepriseId, "valide", ("en_attente",)):
+        return JSONResponse(status_code=409, content={
+            "message": "Ce dossier ne peut pas être validé dans son état actuel.",
+        })
     return {"message": "Dossier validé."}
 
 
 @router.post("/refuser")
-def refuser_dossier_route(payload: ValidationPayload):
-    _maj_statut(payload.entrepriseId, "refuse")
+def refuser_dossier_route(payload: ValidationPayload, _: dict = Depends(exiger_super_admin)):
+    if not _changer_statut_si(payload.entrepriseId, "refuse", ("en_attente", "valide")):
+        return JSONResponse(status_code=409, content={
+            "message": "Ce dossier ne peut pas être refusé dans son état actuel.",
+        })
     return {"message": "Dossier refusé."}
 
 
-def _valider_dossier(entreprise_id: int) -> None:
-    _maj_statut(entreprise_id, "valide")
+def _valider_dossier(entreprise_id: int) -> bool:
+    return _changer_statut_si(entreprise_id, "valide", ("en_attente",))
+
+
+def _changer_statut_si(entreprise_id: int, nouveau_statut: str, statuts_autorises: tuple) -> bool:
+    """Change le statut SEULEMENT si le statut actuel est autorise (une
+    entreprise active ne peut jamais etre rebasculee par erreur ou abus)."""
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE entreprise SET statut = %s WHERE id = %s AND statut = ANY(%s) RETURNING id",
+                (nouveau_statut, entreprise_id, list(statuts_autorises)),
+            )
+            modifie = cur.fetchone() is not None
+        conn.commit()
+    finally:
+        pool_central.putconn(conn)
+    return modifie
 
 
 # --- Étape 4 : Choix de l'abonnement ---
@@ -324,7 +438,11 @@ class AbonnementPayload(BaseModel):
 
 
 @router.post("/abonnement")
-def choisir_abonnement(payload: AbonnementPayload):
+def choisir_abonnement(payload: AbonnementPayload, jeton: str | None = Header(None, alias="X-Jeton-Inscription")):
+    if not _auto_validation_active():
+        _exiger_jeton_inscription(payload.entrepriseId, jeton)
+    if payload.plan not in PLANS_VALIDES:
+        return JSONResponse(status_code=400, content={"message": "Plan d'abonnement invalide."})
     if not _statut_est(payload.entrepriseId, "valide"):
         return JSONResponse(status_code=400, content={"message": "Votre dossier doit être validé avant de choisir un abonnement."})
 
@@ -349,12 +467,24 @@ class PaiementPayload(BaseModel):
 
 
 @router.post("/confirmer-paiement")
-def confirmer_paiement(payload: PaiementPayload):
+def confirmer_paiement(payload: PaiementPayload, acteur=Depends(_super_admin_optionnel)):
+    # Le paiement est simule : tant qu'aucun prestataire reel n'est branche,
+    # seule l'administration de la plateforme (ou le mode demo) peut confirmer.
+    if acteur is None and not _auto_validation_active():
+        raise HTTPException(status_code=403, detail="Le paiement doit être confirmé par l'administration de la plateforme.")
     return _activer_entreprise(payload.entrepriseId)
 
 
 @router.post("/activer-essai")
-def activer_essai(payload: PaiementPayload):
+def activer_essai(
+    payload: PaiementPayload,
+    acteur=Depends(_super_admin_optionnel),
+    jeton: str | None = Header(None, alias="X-Jeton-Inscription"),
+):
+    if acteur is None and not _auto_validation_active():
+        _exiger_jeton_inscription(payload.entrepriseId, jeton)
+        if not _plan_est_essai(payload.entrepriseId):
+            raise HTTPException(status_code=403, detail="Ce plan nécessite un paiement confirmé.")
     return _activer_entreprise(payload.entrepriseId)
 
 
@@ -363,10 +493,13 @@ def _activer_entreprise(entreprise_id: int):
     if not admin_temp:
         return JSONResponse(status_code=400, content={"message": "Aucune inscription en attente pour cette entreprise."})
 
+    if not email_verifie(entreprise_id):
+        return JSONResponse(status_code=400, content={"message": "L'adresse email n'a pas été vérifiée."})
+
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT nom_base FROM entreprise WHERE id = %s", (entreprise_id,))
+            cur.execute("SELECT nom_base, statut FROM entreprise WHERE id = %s", (entreprise_id,))
             ligne = cur.fetchone()
     finally:
         pool_central.putconn(conn)
@@ -374,12 +507,21 @@ def _activer_entreprise(entreprise_id: int):
     if not ligne:
         return JSONResponse(status_code=404, content={"message": "Entreprise introuvable."})
 
-    nom_base = ligne[0]
+    nom_base, statut_actuel = ligne
+    if statut_actuel != "valide":
+        return JSONResponse(status_code=409, content={
+            "message": "Le dossier doit être validé avant l'activation.",
+        })
 
     try:
         provisionner_entreprise(nom_base, admin_temp["nom"], admin_temp["email"], admin_temp["mot_de_passe_hash"], entreprise_id)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"message": f"Erreur lors de la création de l'environnement : {e}"})
+    except Exception:
+        logging.getLogger("erp.onboarding").exception(
+            "Provisioning en echec (entreprise %s)", entreprise_id
+        )
+        return JSONResponse(status_code=500, content={
+            "message": "Erreur lors de la création de l'environnement. Réessayez plus tard ou contactez le support.",
+        })
 
     conn = pool_central.getconn()
     try:

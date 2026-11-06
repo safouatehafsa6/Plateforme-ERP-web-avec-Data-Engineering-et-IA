@@ -15,6 +15,8 @@ import jwt
 from fastapi import HTTPException, Request
 
 from app.db import pool_central
+from app.security.alertes import traiter_connexion
+from app.security.appareils import enregistrer_connexion
 from app.security.audit import journaliser
 
 DUREE_SESSION = timedelta(hours=8)
@@ -103,6 +105,10 @@ def emettre_jeton(claims: dict, request: Request) -> str:
     entreprise_id = claims.get("entrepriseId")
     nb_limite = 0
 
+    # Appareil : la connexion est refusee si l'appareil est bloque (ou en
+    # attente d'autorisation en mode strict).
+    app_info = enregistrer_connexion(claims, request, info, adresse_ip(request))
+
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
@@ -138,15 +144,15 @@ def emettre_jeton(claims: dict, request: Request) -> str:
                 """
                 INSERT INTO session_utilisateur
                     (jti, type_compte, utilisateur_id, email, entreprise_id, nom_base,
-                     systeme, navigateur, appareil, adresse_ip, user_agent, expire_le)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     systeme, navigateur, appareil, adresse_ip, user_agent, expire_le, appareil_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     jti, claims["type"], str(claims["id"]), claims["email"],
                     str(entreprise_id) if entreprise_id is not None else None,
                     claims.get("nomBase"),
                     info["systeme"], info["navigateur"], info["appareil"],
-                    adresse_ip(request), ua[:500], expiration,
+                    adresse_ip(request), ua[:500], expiration, app_info["id"],
                 ),
             )
         conn.commit()
@@ -159,6 +165,11 @@ def emettre_jeton(claims: dict, request: Request) -> str:
         entreprise_id=entreprise_id, jti=jti, request=request,
     )
     journaliser("connexion_reussie", succes=True, **commun)
+    if app_info["nouveau"]:
+        journaliser("nouvel_appareil", gravite="avertissement", succes=True,
+                    details={"raison": "nouvel_appareil"}, **commun)
+    # Detection des connexions inhabituelles (jamais bloquante).
+    traiter_connexion(claims, request, info, adresse_ip(request), app_info, jti)
     if nb_limite:
         journaliser("session_revoquee", gravite="avertissement",
                     details={"motif": "limite_sessions", "nb": nb_limite}, **commun)

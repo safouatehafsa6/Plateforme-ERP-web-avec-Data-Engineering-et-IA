@@ -29,6 +29,7 @@ export default function Inscription() {
   const [typeCompte, setTypeCompte] = useState(null); // "personne_physique" | "entreprise"
   const [entrepriseId, setEntrepriseId] = useState(null);
   const [nomBaseFinal, setNomBaseFinal] = useState("");
+  const [jetonInscription, setJetonInscription] = useState(""); // delivre apres validation de l'OTP
 
   const [form, setForm] = useState({
     nomEntreprise: "", secteur: "", nomAdmin: "",
@@ -129,7 +130,8 @@ export default function Inscription() {
     setErreur("");
     setEnCours(true);
     try {
-      await apiPost("/entreprises/verifier-otp", { entrepriseId, code: codeOtp });
+      const reponseOtp = await apiPost("/entreprises/verifier-otp", { entrepriseId, code: codeOtp });
+      setJetonInscription(reponseOtp.jetonInscription || "");
       setEtape(3);
     } catch (err) {
       setErreur(err.data?.message || err.message);
@@ -153,7 +155,7 @@ export default function Inscription() {
     setErreur("");
     setEnCours(true);
     try {
-      await apiPost("/entreprises/kyc", { entrepriseId, documents });
+      await apiPost("/entreprises/kyc", { entrepriseId, documents }, { "X-Jeton-Inscription": jetonInscription });
       setEtape(4);
     } catch (err) {
       setErreur(err.data?.message || err.message);
@@ -167,7 +169,7 @@ export default function Inscription() {
     setErreur("");
     setEnCours(true);
     try {
-      const data = await apiPost("/entreprises/abonnement", { entrepriseId, plan: plan.id });
+      const data = await apiPost("/entreprises/abonnement", { entrepriseId, plan: plan.id }, { "X-Jeton-Inscription": jetonInscription });
       if (data.requiertPaiement) setEtape(5);
       else await activerDirectement();
     } catch (err) {
@@ -178,7 +180,7 @@ export default function Inscription() {
   }
 
   async function activerDirectement() {
-    const data = await apiPost("/entreprises/activer-essai", { entrepriseId });
+    const data = await apiPost("/entreprises/activer-essai", { entrepriseId }, { "X-Jeton-Inscription": jetonInscription });
     setNomBaseFinal(data.nomBase);
     setEtape(6);
   }

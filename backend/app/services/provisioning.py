@@ -1,5 +1,6 @@
 import os
 import psycopg2
+from psycopg2 import sql
 
 from app.db import pool_central
 
@@ -56,7 +57,10 @@ def creer_base_entreprise(nom_base: str) -> None:
     conn = _connexion_maintenance()
     try:
         with conn.cursor() as cur:
-            cur.execute(f'CREATE DATABASE "{nom_base}"')
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (nom_base,))
+            if cur.fetchone():
+                return  # reprise apres un echec partiel : la base existe deja
+            cur.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(nom_base)))
     finally:
         conn.close()
 
@@ -124,6 +128,27 @@ def appliquer_seed_rbac(nom_base: str) -> None:
         conn.close()
 
 
+class CompteDejaIndexeError(Exception):
+    """L'email est deja rattache a une AUTRE entreprise."""
+
+
+def email_disponible_pour(email: str, entreprise_id) -> bool:
+    """Vrai seulement si l'email n'est rattache a AUCUN compte (interne ou
+    externe, de cette entreprise ou d'une autre). A appeler AVANT de creer un
+    compte dans la base d'une entreprise."""
+    conn = pool_central.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT entreprise_id FROM compte_index WHERE email = %s",
+                (email.strip().lower(),),
+            )
+            ligne = cur.fetchone()
+    finally:
+        pool_central.putconn(conn)
+    return ligne is None
+
+
 def indexer_compte_central(email: str, entreprise_id: int, nom_base: str, type_compte: str = "interne") -> None:
     """Enregistre (ou met à jour) dans la base centrale la correspondance
     email -> entreprise, indispensable au point d'entrée unique de
@@ -146,23 +171,53 @@ def indexer_compte_central(email: str, entreprise_id: int, nom_base: str, type_c
                 INSERT INTO compte_index (email, entreprise_id, nom_base, type_compte)
                 VALUES (%s, %s, %s, %s)
                 ON CONFLICT (email) DO UPDATE
-                    SET entreprise_id = EXCLUDED.entreprise_id,
-                        nom_base = EXCLUDED.nom_base,
+                    SET nom_base = EXCLUDED.nom_base,
                         type_compte = EXCLUDED.type_compte
+                    WHERE compte_index.entreprise_id = EXCLUDED.entreprise_id
+                RETURNING email
                 """,
                 (email.strip().lower(), entreprise_id, nom_base, type_compte),
             )
+            enregistre = cur.fetchone() is not None
         conn.commit()
     finally:
         pool_central.putconn(conn)
+
+    if not enregistre:
+        # Jamais d'ecrasement : l'email appartient deja a une autre entreprise.
+        raise CompteDejaIndexeError("Cet email est deja rattache a une autre entreprise.")
+
+
+def _schema_existe(nom_base: str) -> bool:
+    conn = psycopg2.connect(host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=nom_base)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.utilisateur') IS NOT NULL")
+            return bool(cur.fetchone()[0])
+    finally:
+        conn.close()
+
+
+def _admin_existe(nom_base: str, email: str) -> bool:
+    conn = psycopg2.connect(host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=nom_base)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT EXISTS (SELECT 1 FROM utilisateur WHERE LOWER(email) = LOWER(%s))", (email,))
+            return bool(cur.fetchone()[0])
+    finally:
+        conn.close()
 
 
 def provisionner_entreprise(nom_base: str, nom_admin: str, email_admin: str, mot_de_passe_hash: str, entreprise_id: int) -> None:
     """Orchestre les étapes du provisioning, dans l'ordre. Si une étape
     échoue, l'exception remonte pour que l'appelant puisse marquer
     l'entreprise en erreur plutôt que 'active' à tort."""
+    # Chaque etape est rejouable : un echec partiel peut etre repris sans erreur
+    # « base deja existante » ni doublon.
     creer_base_entreprise(nom_base)
-    initialiser_schema_entreprise(nom_base)
-    creer_administrateur_entreprise(nom_base, nom_admin, email_admin, mot_de_passe_hash)
+    if not _schema_existe(nom_base):
+        initialiser_schema_entreprise(nom_base)
+    if not _admin_existe(nom_base, email_admin):
+        creer_administrateur_entreprise(nom_base, nom_admin, email_admin, mot_de_passe_hash)
     appliquer_seed_rbac(nom_base)
     indexer_compte_central(email_admin, entreprise_id, nom_base)

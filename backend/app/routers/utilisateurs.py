@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import exiger_role_admin
-from app.services.provisioning import indexer_compte_central
+from app.services.provisioning import indexer_compte_central, email_disponible_pour
 
 router = APIRouter(prefix="/api/utilisateurs", tags=["utilisateurs"])
 
@@ -83,6 +83,13 @@ def creer_utilisateur(payload: NouvelUtilisateurPayload, utilisateur=Depends(exi
     """
     email = payload.email.strip().lower()
     pool_tenant = get_pool_entreprise(utilisateur["nomBase"])
+
+    # Controle AVANT toute creation : un email deja rattache a une autre
+    # entreprise ne doit jamais etre detourne vers celle-ci.
+    if utilisateur.get("entrepriseId") is not None and not email_disponible_pour(
+        email, utilisateur["entrepriseId"]
+    ):
+        raise HTTPException(status_code=409, detail="Un compte existe déjà avec cet email.")
 
     mot_de_passe_temporaire = secrets.token_urlsafe(9)
     mot_de_passe_hash = bcrypt.hashpw(mot_de_passe_temporaire.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")

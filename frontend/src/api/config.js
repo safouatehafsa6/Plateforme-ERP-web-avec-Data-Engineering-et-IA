@@ -2,7 +2,29 @@
 // Centralise l'URL de base de l'API pour ne jamais la répéter dans le code.
 // L'API est accessible depuis Windows et Rocky Linux via l'adresse IP de la VM.
 export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://192.168.244.130:8000/api";
+  import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+
+// Identifiant aleatoire de CE navigateur, cree une fois et conserve. Il est
+// envoye a la connexion (en-tete X-Appareil-Id) pour reconnaitre l'appareil ;
+// le serveur n'en garde que l'empreinte.
+export function identifiantAppareil() {
+  try {
+    let id = localStorage.getItem("appareil_id");
+    if (!id) {
+      if (window.crypto && window.crypto.randomUUID) {
+        id = window.crypto.randomUUID();
+      } else {
+        const octets = new Uint8Array(16);
+        window.crypto.getRandomValues(octets);
+        id = Array.from(octets, (o) => o.toString(16).padStart(2, "0")).join("");
+      }
+      localStorage.setItem("appareil_id", id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}
 
 export async function apiGet(endpoint) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`);
@@ -21,10 +43,10 @@ export async function apiGet(endpoint) {
   return data;
 }
 
-export async function apiPost(endpoint, body) {
+export async function apiPost(endpoint, body, entetes = {}) {
   const res = await fetch(`${API_BASE_URL}${endpoint}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Appareil-Id": identifiantAppareil(), ...entetes },
     body: JSON.stringify(body),
   });
 

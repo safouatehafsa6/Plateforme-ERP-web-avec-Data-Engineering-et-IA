@@ -17,6 +17,7 @@ import Ventes from "./pages/Ventes";
 import Achats from "./pages/Achats";
 import Fournisseurs from "./pages/Fournisseurs";
 import Clients from "./pages/Clients";
+import Prospects from "./pages/Prospects";
 import Stock from "./pages/Stock";
 import Parametres from "./pages/Parametres";
 import Facturation from "./pages/Facturation";
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="/ventes" element={<Ventes />} />
             <Route path="/achats" element={<Achats />} />
             <Route path="/fournisseurs" element={<Fournisseurs />} />
+            <Route path="/prospects" element={<Prospects />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/stock" element={<Stock />} />
             <Route path="/parametres" element={<Parametres />} />

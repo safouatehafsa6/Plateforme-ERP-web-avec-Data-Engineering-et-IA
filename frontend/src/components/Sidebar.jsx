@@ -2,7 +2,7 @@ import { useLocation, Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
   LayoutDashboard, ShoppingCart, Truck, Boxes, Users,
-  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, ShieldCheck, Contact, Bot, Activity, Monitor, Calculator, Video,
+  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, UserPlus, ShieldCheck, Contact, Bot, Activity, Monitor, Calculator, Video,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { lireSession, estAdminEntreprise, estSuperAdmin, estProfilEntreprise } from "../api/session";
@@ -23,6 +23,7 @@ const ITEMS = [
   { icon: Truck, label: "achats", chemin: "/achats", visible: estProfilEntreprise },
   { icon: Truck, label: "fournisseurs", chemin: "/fournisseurs", visible: estProfilEntreprise },
   { icon: Boxes, label: "stock", chemin: "/stock", visible: estProfilEntreprise },
+  { icon: UserPlus, label: "prospects", chemin: "/prospects", visible: estProfilEntreprise },
   { icon: Users, label: "clients", chemin: "/clients", visible: estProfilEntreprise },
   { icon: FileText, label: "facturation", chemin: "/facturation", visible: estProfilEntreprise },
   { icon: Wallet, label: "comptabilite", chemin: "/comptabilite", visible: estProfilEntreprise },

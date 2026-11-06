@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Search, Plus, Pencil, X, Users, Eye, Mail, Phone, MapPin, Sparkles, AlertTriangle } from "lucide-react";
+import { Search, Plus, Pencil, X, Users, Eye, Mail, Phone, MapPin, Sparkles, AlertTriangle, Archive, RotateCcw } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import SuiviCommercial from "../components/SuiviCommercial";
+import ArchivageDialog from "../components/ArchivageDialog";
+import { peutFaire } from "../validation/prospect";
 import { API_BASE_URL } from "../api/config";
 import { normaliserClient, validerClient, suggererCorrectionEmail } from "../validation/client";
 
@@ -135,8 +138,9 @@ function ClientForm({ initial, onClose, onSaved }) {
   );
 }
 
-function FicheClient({ client, onClose, onModifier }) {
+function FicheClient({ client, droits, historique, onClose, onModifier, onAjouterSuivi, onArchiver, onReactiver }) {
   if (!client) return null;
+  const modifiable = !client.archive && peutFaire(droits, "modifier");
   return (
     <div className="clients-overlay" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <section className="panel clients-fiche" role="dialog" aria-modal="true" aria-labelledby="fiche-client-titre">
@@ -147,7 +151,14 @@ function FicheClient({ client, onClose, onModifier }) {
           <div className="clients-info-item clients-info-item--wide"><MapPin size={18} /><div><span>Adresse</span><strong>{client.adresse || "Non renseignée"}</strong></div></div>
           <div className="clients-info-item clients-info-item--wide"><Users size={18} /><div><span>Commandes associées</span><strong>{client.nombre_commandes ?? 0}</strong></div></div>
         </div>
-        <div className="clients-fiche__footer"><button type="button" className="bouton-secondaire-large" onClick={onClose}>Fermer</button><button type="button" className="bouton-principal achats-btn-auto" onClick={() => onModifier(client)}><Pencil size={15} /> Modifier le client</button></div>
+        {client.archive && <div className="clients-warning"><Archive size={18} /><span>Client archivé{client.archive_motif ? ` — ${client.archive_motif}` : ""}. Ses commandes, factures et son historique sont conservés.</span></div>}
+        <div className="clients-fiche__footer prospects-actions">
+          <button type="button" className="bouton-secondaire-large" onClick={onClose}>Fermer</button>
+          {!client.archive && peutFaire(droits, "supprimer") && <button type="button" className="bouton-secondaire-large" onClick={onArchiver}><Archive size={15} /> Archiver</button>}
+          {client.archive && peutFaire(droits, "supprimer") && <button type="button" className="bouton-principal achats-btn-auto" onClick={onReactiver}><RotateCcw size={15} /> Réactiver</button>}
+          {modifiable && <button type="button" className="bouton-principal achats-btn-auto" onClick={() => onModifier(client)}><Pencil size={15} /> Modifier le client</button>}
+        </div>
+        <SuiviCommercial historique={historique} contexteClient peutAjouter={modifiable} onAjouter={onAjouterSuivi} />
       </section>
     </div>
   );
@@ -161,21 +172,35 @@ export default function Clients() {
   const [form, setForm] = useState(null);
   const [fiche, setFiche] = useState(null);
   const [chargementFiche, setChargementFiche] = useState(false);
+  const [droits, setDroits] = useState([]);
+  const [archives, setArchives] = useState("actifs");
+  const [historique, setHistorique] = useState([]);
+  const [archivage, setArchivage] = useState(false);
+  const [info, setInfo] = useState("");
 
   async function charger() {
     setLoading(true); setErreur("");
-    try { const r = await api("/clients"); setItems(r.clients || []); }
+    try { const r = await api(`/clients?archives=${archives}`); setItems(r.clients || []); }
     catch (e) { setErreur(e.message); } finally { setLoading(false); }
   }
-  useEffect(() => { charger(); }, []);
+  useEffect(() => { charger(); }, [archives]);
+  useEffect(() => { api("/clients/permissions").then((r) => setDroits(r.actions || [])).catch(() => setDroits([])); }, []);
 
   const filtered = useMemo(() => items.filter((f) => `${f.nom} ${f.email || ""} ${f.telephone || ""} ${f.adresse || ""}`.toLowerCase().includes(search.toLowerCase())), [items, search]);
 
   async function ouvrirFiche(client) {
-    setChargementFiche(true);
-    try { setFiche(await api(`/clients/${client.id}`)); }
+    setChargementFiche(true); setInfo("");
+    try {
+      const [fiche, h] = await Promise.all([api(`/clients/${client.id}`), api(`/clients/${client.id}/historique`)]);
+      setFiche(fiche); setHistorique(h.historique || []);
+    }
     catch (e) { setErreur(e.message); }
     finally { setChargementFiche(false); }
+  }
+
+  async function reactiver(client) {
+    try { const r = await api(`/clients/${client.id}/reactiver`, { method: "POST" }); setInfo(r.message); await ouvrirFiche(client); charger(); }
+    catch (e) { setErreur(e.message); }
   }
 
   function modifierDepuisFiche(client) { setFiche(null); setForm(client); }
@@ -187,17 +212,23 @@ export default function Clients() {
         <header className="app-topbar"><div className="app-topbar__recherche"><Search size={16}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un client" /></div><div className="app-topbar__droite"><Users size={18}/><div className="app-topbar__avatar">A</div></div></header>
         <main className="app-main">
           <div className="achats-entete"><div><h1 className="app-main__titre">Clients</h1><p className="achats-sous-titre">Gestion des clients utilisés dans les commandes et bons de commande.</p></div><button className="bouton-principal achats-btn-auto" onClick={() => setForm({})}><Plus size={16}/> Nouveau client</button></div>
-          <div className="clients-feature-note"><Sparkles size={17}/><span>Assistance à la saisie, contrôle des doublons et fiches clients détaillées.</span></div>
+          <div className="clients-feature-note"><Sparkles size={17}/><span>Assistance à la saisie, contrôle des doublons, suivi commercial daté et archivage sans perte d'historique.</span></div>
+          <div className="prospects-filtres"><label>Affichage<select value={archives} onChange={(e) => setArchives(e.target.value)}><option value="actifs">Clients actifs</option><option value="archives">Archivés</option><option value="tous">Tous</option></select></label></div>
+          {info && <div className="prospects-succes" role="status">{info}</div>}
           {erreur && <div className="erreur-message" role="alert">{erreur}</div>}
           {form && <ClientForm key={form.id || "nouveau-client"} initial={form.id ? form : null} onClose={() => setForm(null)} onSaved={() => { setForm(null); charger(); }} />}
           {loading ? <p>Chargement…</p> : <div className="table-module achats-table"><table><thead><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Adresse</th><th>Commandes</th><th>Actions</th></tr></thead><tbody>
-            {filtered.map((f) => <tr key={f.id}><td><strong>{f.nom}</strong></td><td>{f.email || "—"}</td><td>{f.telephone || "—"}</td><td>{f.adresse || "—"}</td><td>{f.nombre_commandes ?? 0}</td><td><div className="achats-actions clients-row-actions"><button type="button" onClick={() => ouvrirFiche(f)}><Eye size={14}/> Fiche</button><button type="button" onClick={() => setForm(f)}><Pencil size={14}/> Modifier</button></div></td></tr>)}
+            {filtered.map((f) => <tr key={f.id} className={f.archive ? "prospects-ligne--archive" : ""}><td><strong>{f.nom}</strong>{f.archive && <span className="achats-badge prospects-statut--archive">Archivé</span>}</td><td>{f.email || "—"}</td><td>{f.telephone || "—"}</td><td>{f.adresse || "—"}</td><td>{f.nombre_commandes ?? 0}</td><td><div className="achats-actions clients-row-actions"><button type="button" onClick={() => ouvrirFiche(f)}><Eye size={14}/> Fiche</button>{!f.archive && peutFaire(droits, "modifier") && <button type="button" onClick={() => setForm(f)}><Pencil size={14}/> Modifier</button>}</div></td></tr>)}
             {filtered.length === 0 && <tr><td colSpan="6">Aucun client.</td></tr>}
           </tbody></table></div>}
           {chargementFiche && <p className="achats-muted">Chargement de la fiche client…</p>}
         </main>
       </div>
-      <FicheClient client={fiche} onClose={() => setFiche(null)} onModifier={modifierDepuisFiche} />
+      <FicheClient client={fiche} droits={droits} historique={historique} onClose={() => setFiche(null)} onModifier={modifierDepuisFiche}
+        onAjouterSuivi={async (payload) => { await api(`/clients/${fiche.id}/suivis`, { method: "POST", body: JSON.stringify(payload) }); await ouvrirFiche(fiche); }}
+        onArchiver={() => setArchivage(true)} onReactiver={() => reactiver(fiche)} />
+      {archivage && fiche && <ArchivageDialog titre="Archiver le client" onClose={() => setArchivage(false)}
+        onConfirmer={async (motif) => { const r = await api(`/clients/${fiche.id}/archiver`, { method: "POST", body: JSON.stringify({ motif }) }); setArchivage(false); setInfo(r.message); setFiche(null); charger(); }} />}
     </div>
   );
 }

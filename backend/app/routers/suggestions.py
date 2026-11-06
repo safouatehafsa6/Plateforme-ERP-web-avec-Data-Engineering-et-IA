@@ -22,7 +22,7 @@ def _autorise(utilisateur: dict, module: str) -> bool:
 def _catalogue(utilisateur: dict) -> list[dict]:
     """Noms réels de l'entreprise, limités aux modules que l'utilisateur a le droit de consulter."""
     sources = [
-        ("clients", "client", "SELECT nom, NULL FROM client ORDER BY nom LIMIT %s"),
+        ("clients", "client", "SELECT nom, NULL FROM client WHERE NOT archive ORDER BY nom LIMIT %s"),
         ("fournisseurs", "fournisseur", "SELECT nom, NULL FROM fournisseur ORDER BY nom LIMIT %s"),
         ("stock", "produit", "SELECT nom, reference FROM produit ORDER BY nom LIMIT %s"),
     ]

@@ -67,3 +67,35 @@ def exiger_permission(module: str, action: str):
         return utilisateur
 
     return verifier
+
+
+ACTIONS_RBAC = ("consulter", "creer", "modifier", "supprimer", "valider", "exporter")
+
+
+def actions_autorisees(utilisateur: dict, module: str) -> list[str]:
+    """Actions RBAC dont dispose le compte sur un module (sert à adapter l'interface ;
+    chaque route reste protégée par exiger_permission)."""
+    pool = get_pool_entreprise(utilisateur["nomBase"])
+    conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.nom, COALESCE(array_agg(p.action) FILTER (WHERE p.action IS NOT NULL), '{}')
+                FROM utilisateur u
+                LEFT JOIN role r ON r.id = u.role_id
+                LEFT JOIN role_permission rp ON rp.role_id = u.role_id
+                LEFT JOIN permission p ON p.id = rp.permission_id AND p.module = %s
+                WHERE u.id = %s AND u.actif
+                GROUP BY r.nom
+                """,
+                (module, utilisateur["id"]),
+            )
+            ligne = cur.fetchone()
+    finally:
+        pool.putconn(conn)
+    if not ligne:
+        return []
+    if ligne[0] == "Admin":
+        return list(ACTIONS_RBAC)
+    return [a for a in ACTIONS_RBAC if a in (ligne[1] or [])]

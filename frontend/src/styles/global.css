@@ -2296,3 +2296,38 @@ a {
 .calculs-trou td { background: color-mix(in srgb, #d68910 18%, transparent); font-size: 0.82rem; }
 .calculs-trou svg { vertical-align: -2px; margin-inline-end: 0.3rem; }
 .calculs-archive td { opacity: 0.55; }
+
+/* ===== Prospects & suivi commercial ===== */
+.prospects-filtres { display:flex; flex-wrap:wrap; gap:1rem; margin:0 0 1rem; }
+.prospects-filtres label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; color:var(--text-secondary, #64748b); }
+.prospects-filtres select { padding:.45rem .6rem; border:1px solid var(--paper-line); border-radius:6px; background:var(--carte-fond); color:var(--text-dark); }
+.prospects-statut--nouveau { background:#eef2fb; color:#385b9c; border-color:transparent; }
+.prospects-statut--contacte { background:#fff4dd; color:#8a5a00; border-color:transparent; }
+.prospects-statut--qualifie { background:#e7f0ff; color:#1d4ed8; border-color:transparent; }
+.prospects-statut--converti { background:#dcf0ee; color:var(--teal); border-color:transparent; }
+.prospects-statut--perdu { background:#fbeae6; color:var(--danger); border-color:transparent; }
+.prospects-statut--archive { margin-left:.35rem; background:#eceff3; color:#475569; border-color:transparent; }
+.prospects-ligne--archive td { opacity:.7; }
+.prospects-retard { color:var(--danger); font-weight:600; }
+.prospects-succes { margin:.75rem 0; padding:.7rem .9rem; border:1px solid #86d3c8; border-radius:.65rem; background:#e8f7f4; color:#0f5f55; font-size:.9rem; }
+.prospects-doublons ul { margin:.4rem 0; padding-left:1.1rem; }
+.prospects-doublons li { margin:.2rem 0; }
+.prospects-lien { margin-left:.5rem; border:0; background:none; color:#1d4ed8; text-decoration:underline; cursor:pointer; font-size:.85rem; }
+.prospects-fiche { width:min(100%, 760px); }
+.prospects-actions { flex-wrap:wrap; }
+.prospects-statut-form { display:flex; flex-wrap:wrap; align-items:center; gap:.5rem; margin:.5rem 0 1rem; }
+.prospects-statut-form label { font-weight:600; font-size:.85rem; }
+.prospects-statut-form input { flex:1; min-width:180px; }
+.suivi { margin-top:1.25rem; padding-top:1rem; border-top:1px solid var(--border-color, #e5e7eb); }
+.suivi__titre { margin:0 0 .75rem; font-size:1rem; }
+.suivi__form { margin-bottom:1rem; }
+.suivi__liste { list-style:none; margin:0; padding:0 0 0 .9rem; border-left:2px solid var(--paper-line, #e5e7eb); }
+.suivi__item { position:relative; margin:0 0 .9rem; padding-left:.75rem; }
+.suivi__item::before { content:""; position:absolute; left:-1.32rem; top:.35rem; width:.65rem; height:.65rem; border-radius:50%; background:#94a3b8; }
+.suivi__item--appel::before, .suivi__item--rendez_vous::before { background:#1d4ed8; }
+.suivi__item--conversion::before { background:var(--teal, #0f766e); }
+.suivi__item--archivage::before { background:#64748b; }
+.suivi__entete { display:flex; flex-wrap:wrap; align-items:baseline; gap:.5rem; }
+.suivi__entete time { margin-left:auto; font-size:.78rem; color:var(--text-secondary, #64748b); }
+.suivi__texte { margin:.2rem 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.suivi__auteur { margin:.1rem 0 0; font-size:.75rem; color:var(--text-secondary, #64748b); }

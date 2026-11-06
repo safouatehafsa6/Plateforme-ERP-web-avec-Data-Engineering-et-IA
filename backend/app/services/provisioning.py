@@ -24,6 +24,7 @@ SCRIPTS_SCHEMA_ENTREPRISE = [
     os.path.join(DOSSIER_TEMPLATE, "016_assistant_rag_embeddings.sql"),
     os.path.join(DOSSIER_TEMPLATE, "017_support.sql"),
     os.path.join(DOSSIER_TEMPLATE, "018_calculs_taux.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "019_prospects.sql"),
 ]
 
 # Scripts appliqués APRÈS la création du schéma, dans cet ordre. Ils
@@ -33,6 +34,7 @@ SCRIPTS_SCHEMA_ENTREPRISE = [
 SCRIPTS_SEED_ENTREPRISE = [
     os.path.join(DOSSIER_TEMPLATE, "008_roles_permissions_preconfigures.sql"),
     os.path.join(DOSSIER_TEMPLATE, "015_documents_permissions.sql"),
+    os.path.join(DOSSIER_TEMPLATE, "020_prospects_permissions.sql"),
 ]
 
 

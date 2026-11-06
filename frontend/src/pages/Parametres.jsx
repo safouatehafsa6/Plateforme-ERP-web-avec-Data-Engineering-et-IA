@@ -7,6 +7,7 @@ const FEATURES = [
   ["ventes", "Ventes"],
   ["achats", "Achats"],
   ["fournisseurs", "Fournisseurs"],
+  ["prospects", "Prospects"],
   ["clients", "Clients"],
   ["stock", "Stock"],
   ["facturation", "Facturation"],

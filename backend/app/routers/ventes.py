@@ -72,9 +72,12 @@ def _total(lignes: list[LigneDocument]) -> Decimal:
 def _verifier_client_et_produits(cur, client_id: int, lignes: list[LigneDocument]):
     if not lignes:
         raise HTTPException(status_code=400, detail="Ajoutez au moins une ligne au document.")
-    cur.execute("SELECT 1 FROM client WHERE id = %s", (client_id,))
-    if not cur.fetchone():
+    cur.execute("SELECT archive FROM client WHERE id = %s", (client_id,))
+    client = cur.fetchone()
+    if not client:
         raise HTTPException(status_code=404, detail="Client introuvable.")
+    if client[0]:
+        raise HTTPException(status_code=409, detail="Client archivé : réactivez-le pour créer un nouveau document.")
     ids = sorted({l.produitId for l in lignes})
     cur.execute("SELECT id FROM produit WHERE id = ANY(%s)", (ids,))
     trouves = {r[0] for r in cur.fetchall()}
@@ -111,7 +114,7 @@ def references(utilisateur=Depends(exiger_permission("ventes", "consulter"))):
     conn = pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, nom, email, telephone, adresse FROM client ORDER BY nom")
+            cur.execute("SELECT id, nom, email, telephone, adresse FROM client WHERE NOT archive ORDER BY nom")
             clients = _dicts(cur)
             cur.execute("SELECT id, reference, nom, categorie, prix_unitaire, stock_actuel FROM produit ORDER BY nom")
             produits = _dicts(cur)

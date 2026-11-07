@@ -39,10 +39,14 @@ class StatutPayload(BaseModel):
     statut: str
 
 
-class ReceptionPayload(BaseModel):
-    lignes: list[dict]
-    notes: str | None = None
+class LigneReceptionPayload(BaseModel):
+    produitId: int = Field(gt=0)
+    quantite: int = Field(gt=0)
 
+
+class ReceptionPayload(BaseModel):
+    lignes: list[LigneReceptionPayload]
+    notes: str | None = None
 
 def _pool(utilisateur):
     return get_pool_entreprise(utilisateur["nomBase"])
@@ -285,58 +289,159 @@ def convertir_demande(demande_id: int, fournisseur_id: int, utilisateur=Depends(
 
 
 @router.post("/bons-commande/{achat_id}/receptionner")
-def receptionner(achat_id: int, payload: ReceptionPayload, utilisateur=Depends(exiger_permission("achats", "valider"))):
-    pool = _pool(utilisateur); conn = pool.getconn()
+
+def receptionner(achat_id: int, payload: ReceptionPayload,
+                 utilisateur=Depends(exiger_permission("achats", "valider"))):
+    pool = _pool(utilisateur)
+    conn = pool.getconn()
+
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT numero, statut FROM achat WHERE id=%s FOR UPDATE", (achat_id,))
+            cur.execute(
+                "SELECT numero, statut FROM achat WHERE id=%s FOR UPDATE",
+                (achat_id,)
+            )
             achat = cur.fetchone()
-            if not achat: raise HTTPException(status_code=404, detail="Bon de commande introuvable.")
-            if achat[1] == "annulee": raise HTTPException(status_code=400, detail="Un bon annulé ne peut pas être réceptionné.")
-            if not payload.lignes: raise HTTPException(status_code=400, detail="Ajoutez au moins une ligne à la réception.")
 
-            cur.execute("SELECT produit_id, quantite FROM ligne_achat WHERE achat_id=%s", (achat_id,))
-            commandes = {r[0]: r[1] for r in cur.fetchall()}
-            cur.execute("""SELECT lr.produit_id, COALESCE(SUM(lr.quantite),0)
-                           FROM ligne_reception_achat lr JOIN reception_achat r ON r.id=lr.reception_id
-                           WHERE r.achat_id=%s AND r.statut='receptionnee' GROUP BY lr.produit_id""", (achat_id,))
-            deja = {r[0]: r[1] for r in cur.fetchall()}
+            if not achat:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Bon de commande introuvable."
+                )
 
-            lignes_valides = []
+            if achat[1] == "annulee":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Un bon annulé ne peut pas être réceptionné."
+                )
+
+            if not payload.lignes:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Ajoutez au moins une ligne à la réception."
+                )
+
+            # Quantités commandées, regroupées par produit.
+            cur.execute("""
+                SELECT produit_id, SUM(quantite)
+                FROM ligne_achat
+                WHERE achat_id=%s
+                GROUP BY produit_id
+            """, (achat_id,))
+            commandes = {r[0]: int(r[1]) for r in cur.fetchall()}
+
+            # Quantités déjà réceptionnées.
+            cur.execute("""
+                SELECT lr.produit_id, COALESCE(SUM(lr.quantite), 0)
+                FROM ligne_reception_achat lr
+                JOIN reception_achat r ON r.id = lr.reception_id
+                WHERE r.achat_id=%s AND r.statut='receptionnee'
+                GROUP BY lr.produit_id
+            """, (achat_id,))
+            deja = {r[0]: int(r[1]) for r in cur.fetchall()}
+
+            # Regrouper les lignes reçues pour éviter les doublons.
+            recues = {}
+
             for item in payload.lignes:
-                try:
-                    produit_id = int(item.get("produitId"))
-                    quantite = int(item.get("quantite"))
-                except (TypeError, ValueError):
-                    raise HTTPException(status_code=400, detail="Ligne de réception invalide.")
+                produit_id = item.produitId
+                quantite = item.quantite
+
                 if produit_id not in commandes:
-                    raise HTTPException(status_code=400, detail=f"Le produit {produit_id} n'appartient pas au bon de commande.")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Le produit {produit_id} n'appartient pas au bon de commande."
+                    )
+
+                recues[produit_id] = recues.get(produit_id, 0) + quantite
+
+            # Vérifier les quantités cumulées.
+            for produit_id, quantite in recues.items():
                 restante = commandes[produit_id] - deja.get(produit_id, 0)
-                if quantite <= 0 or quantite > restante:
-                    raise HTTPException(status_code=400, detail=f"Quantité reçue invalide pour le produit {produit_id}. Restant : {restante}.")
-                lignes_valides.append((produit_id, quantite))
+
+                if quantite > restante:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Quantité reçue invalide pour le produit {produit_id}. Restant : {restante}."
+                    )
 
             numero = _numero(cur, "REC", "seq_reception_achat_numero")
-            cur.execute("INSERT INTO reception_achat (achat_id, numero, notes) VALUES (%s,%s,%s) RETURNING id", (achat_id, numero, payload.notes))
+
+            cur.execute("""
+                INSERT INTO reception_achat (achat_id, numero, notes)
+                VALUES (%s, %s, %s)
+                RETURNING id
+            """, (achat_id, numero, payload.notes))
+
             rid = cur.fetchone()[0]
-            cur.executemany("INSERT INTO ligne_reception_achat (reception_id, produit_id, quantite) VALUES (%s,%s,%s)", [(rid,p,q) for p,q in lignes_valides])
 
-            for produit_id, quantite in lignes_valides:
-                cur.execute("UPDATE produit SET stock_actuel = COALESCE(stock_actuel,0) + %s WHERE id=%s", (quantite, produit_id))
-                cur.execute("INSERT INTO mouvement_stock (produit_id, type_mouvement, quantite, reference_doc) VALUES (%s,'entree',%s,%s)", (produit_id, quantite, numero))
+            lignes_valides = [
+                (rid, produit_id, quantite)
+                for produit_id, quantite in recues.items()
+            ]
 
+            cur.executemany("""
+                INSERT INTO ligne_reception_achat
+                (reception_id, produit_id, quantite)
+                VALUES (%s, %s, %s)
+            """, lignes_valides)
+
+            # Mettre à jour le stock et enregistrer le mouvement.
+            for produit_id, quantite in recues.items():
+                cur.execute("""
+                    UPDATE produit
+                    SET stock_actuel = COALESCE(stock_actuel, 0) + %s
+                    WHERE id=%s
+                """, (quantite, produit_id))
+
+                cur.execute("""
+                    INSERT INTO mouvement_stock
+                    (produit_id, type_mouvement, quantite, reference_doc)
+                    VALUES (%s, 'entree', %s, %s)
+                """, (produit_id, quantite, numero))
+
+            # Calculer le statut de réception.
             nouveau_total_recu = dict(deja)
-            for p,q in lignes_valides: nouveau_total_recu[p] = nouveau_total_recu.get(p,0) + q
-            complet = all(nouveau_total_recu.get(p,0) >= q for p,q in commandes.items())
-            statut = "receptionne" if complet else "reception_partielle"
-            cur.execute("UPDATE achat SET statut=%s, date_modification=NOW() WHERE id=%s", (statut, achat_id))
-        conn.commit()
-    except Exception:
-        conn.rollback(); raise
-    finally: pool.putconn(conn)
-    notifier_action(utilisateur, "Réception enregistrée", f"La réception {numero} a été enregistrée et le stock a été mis à jour.", "/achats")
-    return {"id": rid, "numero": numero, "message": "Réception enregistrée et stock mis à jour."}
 
+            for produit_id, quantite in recues.items():
+                nouveau_total_recu[produit_id] = (
+                    nouveau_total_recu.get(produit_id, 0) + quantite
+                )
+
+            complet = all(
+                nouveau_total_recu.get(produit_id, 0) >= quantite
+                for produit_id, quantite in commandes.items()
+            )
+
+            statut = "receptionne" if complet else "reception_partielle"
+
+            cur.execute("""
+                UPDATE achat
+                SET statut=%s, date_modification=NOW()
+                WHERE id=%s
+            """, (statut, achat_id))
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        pool.putconn(conn)
+
+    notifier_action(
+        utilisateur,
+        "achats",
+        "receptionner",
+        f"Réception {numero} du bon de commande {achat_id}"
+    )
+
+    return {
+        "message": "Réception enregistrée avec succès.",
+        "numero": numero,
+        "statut": statut
+    }
 
 @router.get("/receptions")
 def lister_receptions(utilisateur=Depends(exiger_permission("achats", "consulter"))):

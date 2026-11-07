@@ -290,26 +290,78 @@ def creer_commande(payload: DocumentPayload, utilisateur=Depends(exiger_permissi
     return {"id": cid, "numero": numero, "message": "Commande créée."}
 
 
+
 @router.post("/commandes/{commande_id}/livrer")
 def creer_bl(commande_id: int, payload: LivraisonPayload, utilisateur=Depends(exiger_permission("ventes", "valider"))):
-    pool = _pool(utilisateur); conn = pool.getconn()
+    pool = _pool(utilisateur)
+    conn = pool.getconn()
+
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT statut FROM commande WHERE id=%s FOR UPDATE", (commande_id,))
+            cur.execute(
+                "SELECT statut FROM commande WHERE id=%s FOR UPDATE",
+                (commande_id,)
+            )
             row = cur.fetchone()
-            if not row: raise HTTPException(status_code=404, detail="Commande introuvable.")
-            if row[0] in ("annulee",): raise HTTPException(status_code=400, detail="Une commande annulée ne peut pas être livrée.")
-            numero = _numero(cur, "BL", "seq_bl_numero")
-            cur.execute("INSERT INTO bon_livraison (commande_id, numero, adresse_livraison, notes) VALUES (%s,%s,%s,%s) RETURNING id", (commande_id, numero, payload.adresseLivraison, payload.notes))
-            bl_id = cur.fetchone()[0]
-            cur.execute("INSERT INTO ligne_bon_livraison (bon_livraison_id, produit_id, quantite) SELECT %s, produit_id, quantite FROM ligne_commande WHERE commande_id=%s", (bl_id, commande_id))
-            cur.execute("UPDATE commande SET statut='livree', date_modification=NOW() WHERE id=%s", (commande_id,))
-        conn.commit()
-    except Exception:
-        conn.rollback(); raise
-    finally: pool.putconn(conn)
-    return {"id": bl_id, "numero": numero, "message": "Bon de livraison créé."}
 
+            if not row:
+                raise HTTPException(status_code=404, detail="Commande introuvable.")
+
+            if row[0] == "annulee":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Une commande annulée ne peut pas être livrée."
+                )
+
+            if row[0] == "livree":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cette commande a déjà été livrée."
+                )
+
+            numero = _numero(cur, "BL", "seq_bl_numero")
+
+            cur.execute(
+                """
+                INSERT INTO bon_livraison
+                    (commande_id, numero, adresse_livraison, notes)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (commande_id, numero, payload.adresseLivraison, payload.notes)
+            )
+            bl_id = cur.fetchone()[0]
+
+            cur.execute(
+                """
+                INSERT INTO ligne_bon_livraison
+                    (bon_livraison_id, produit_id, quantite)
+                SELECT %s, produit_id, quantite
+                FROM ligne_commande
+                WHERE commande_id=%s
+                """,
+                (bl_id, commande_id)
+            )
+
+            cur.execute(
+                "UPDATE commande SET statut='livree', date_modification=NOW() WHERE id=%s",
+                (commande_id,)
+            )
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        pool.putconn(conn)
+
+    return {
+        "id": bl_id,
+        "numero": numero,
+        "message": "Bon de livraison créé."
+    }
 
 @router.get("/bons-livraison")
 def lister_bl(utilisateur=Depends(exiger_permission("ventes", "consulter"))):
@@ -330,50 +382,87 @@ def lister_bl(utilisateur=Depends(exiger_permission("ventes", "consulter"))):
     return {"bonsLivraison": docs}
 
 
+
 @router.post("/commandes/{commande_id}/facturer")
 def facturer_commande(commande_id: int, utilisateur=Depends(exiger_permission("facturation", "creer"))):
-    pool = _pool(utilisateur); conn = pool.getconn()
+    pool = _pool(utilisateur)
+    conn = pool.getconn()
+
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, numero FROM facture WHERE commande_id=%s ORDER BY id LIMIT 1", (commande_id,))
-            existe = cur.fetchone()
-            if existe: return {"id": existe[0], "numero": existe[1], "message": "Cette commande est déjà facturée."}
-            cur.execute("SELECT montant_total, statut FROM commande WHERE id=%s", (commande_id,))
+            # Verrouiller la commande pour éviter les facturations simultanées.
+            cur.execute(
+                "SELECT montant_total, statut FROM commande WHERE id=%s FOR UPDATE",
+                (commande_id,)
+            )
             c = cur.fetchone()
-            if not c: raise HTTPException(status_code=404, detail="Commande introuvable.")
-            if c[1] == "annulee": raise HTTPException(status_code=400, detail="Une commande annulée ne peut pas être facturée.")
+
+            if not c:
+                raise HTTPException(status_code=404, detail="Commande introuvable.")
+
+            if c[1] == "annulee":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Une commande annulée ne peut pas être facturée."
+                )
+
+            # Vérifier l'existence d'une facture après obtention du verrou.
+            cur.execute(
+                "SELECT id, numero FROM facture WHERE commande_id=%s ORDER BY id LIMIT 1",
+                (commande_id,)
+            )
+            existe = cur.fetchone()
+
+            if existe:
+                conn.commit()
+                return {
+                    "id": existe[0],
+                    "numero": existe[1],
+                    "message": "Cette commande est déjà facturée."
+                }
+
             numero = _numero(cur, "FAC", "seq_facture_numero")
-            cur.execute("""INSERT INTO facture (commande_id, numero, montant_total, statut, code_verification)
-                           VALUES (%s,%s,%s,'impayee',encode(gen_random_bytes(24),'hex')) RETURNING id""", (commande_id, numero, c[0]))
+
+            cur.execute(
+                """
+                INSERT INTO facture
+                    (commande_id, numero, montant_total, statut, code_verification)
+                VALUES (%s, %s, %s, 'impayee', encode(gen_random_bytes(24), 'hex'))
+                RETURNING id
+                """,
+                (commande_id, numero, c[0])
+            )
             fid = cur.fetchone()[0]
-            cur.execute("""INSERT INTO ligne_facture (facture_id, produit_id, designation, quantite, prix_unitaire, remise_pct)
-                           SELECT %s, lc.produit_id, p.nom, lc.quantite, lc.prix_unitaire, lc.remise_pct
-                           FROM ligne_commande lc JOIN produit p ON p.id=lc.produit_id WHERE lc.commande_id=%s""", (fid, commande_id))
+
+            cur.execute(
+                """
+                INSERT INTO ligne_facture
+                    (facture_id, produit_id, designation, quantite, prix_unitaire, remise_pct)
+                SELECT %s, lc.produit_id, p.nom, lc.quantite, lc.prix_unitaire, lc.remise_pct
+                FROM ligne_commande lc
+                JOIN produit p ON p.id = lc.produit_id
+                WHERE lc.commande_id = %s
+                """,
+                (fid, commande_id)
+            )
+
         conn.commit()
+
     except Exception:
-        conn.rollback(); raise
-    finally: pool.putconn(conn)
-    _notifier_action(utilisateur, "Facture créée", f"La facture {numero} a été créée avec succès.", "/facturation")
+        conn.rollback()
+        raise
+
+    finally:
+        pool.putconn(conn)
+
+    _notifier_action(
+        utilisateur,
+        "Facture créée",
+        f"La facture {numero} a été créée avec succès.",
+        "/facturation"
+    )
+
     return {"id": fid, "numero": numero, "message": "Facture créée."}
-
-
-@router.get("/factures")
-def lister_factures(utilisateur=Depends(exiger_permission("facturation", "consulter"))):
-    pool = _pool(utilisateur); conn = pool.getconn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""SELECT f.id, f.numero, f.date_facture, f.montant_total, f.statut,
-                                  c.id AS commande_id, c.numero AS commande_numero, cl.nom AS client_nom
-                           FROM facture f LEFT JOIN commande c ON c.id=f.commande_id
-                           LEFT JOIN client cl ON cl.id=c.client_id
-                           ORDER BY f.date_facture DESC, f.id DESC""")
-            docs = _dicts(cur)
-            for d in docs:
-                cur.execute("SELECT id, produit_id, designation, quantite, prix_unitaire, remise_pct FROM ligne_facture WHERE facture_id=%s ORDER BY id", (d["id"],))
-                d["lignes"] = _dicts(cur)
-    finally: pool.putconn(conn)
-    return {"factures": docs}
-
 
 @router.patch("/factures/{facture_id}/statut")
 def statut_facture(facture_id: int, payload: StatutPayload, utilisateur=Depends(exiger_permission("facturation", "valider"))):

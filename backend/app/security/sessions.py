@@ -34,7 +34,8 @@ def _lire_entier_env(nom, defaut, minimum, maximum):
 
 # Nombre maximal de sessions actives par utilisateur : au-dela, la plus
 # ancienne est revoquee a la connexion (motif : limite_sessions).
-MAX_SESSIONS_PAR_UTILISATEUR = _lire_entier_env("MAX_SESSIONS_PAR_UTILISATEUR", 5, 1, 50)
+MAX_SESSIONS_PAR_UTILISATEUR = _lire_entier_env("MAX_SESSIONS_PAR_UTILISATEUR", 1, 1, 50)
+DUREE_INACTIVITE = timedelta(minutes=_lire_entier_env("DUREE_INACTIVITE_MINUTES", 30, 1, 1440))
 # Nombre de reverse proxies de confiance devant le backend (si TRUST_PROXY=1).
 NB_PROXIES_CONFIANCE = _lire_entier_env("TRUST_PROXY_HOPS", 1, 1, 5)
 
@@ -204,9 +205,29 @@ def verifier_session(charge: dict) -> None:
                     detail="Cette session a \u00e9t\u00e9 ferm\u00e9e ou a expir\u00e9. Merci de vous reconnecter.",
                 )
 
+            # Expiration automatique apres inactivite (DUREE_INACTIVITE).
+            if maintenant - ligne[2] > DUREE_INACTIVITE:
+                cur.execute(
+                    """
+                    UPDATE session_utilisateur
+                    SET revoquee_le = NOW(), motif_revocation = 'inactivite'
+                    WHERE jti = %s AND revoquee_le IS NULL
+                    """,
+                    (jti,),
+                )
+                conn.commit()
+                raise HTTPException(
+                    status_code=401,
+                    detail="Session expir\u00e9e apr\u00e8s une p\u00e9riode d'inactivit\u00e9. Merci de vous reconnecter.",
+                )
+
+            # Actualisation de l'activite au maximum une fois par minute.
             if maintenant - ligne[2] > INTERVALLE_ACTIVITE:
                 cur.execute(
-                    "UPDATE session_utilisateur SET derniere_activite = NOW() WHERE jti = %s",
+                    """
+                    UPDATE session_utilisateur SET derniere_activite = NOW()
+                    WHERE jti = %s AND revoquee_le IS NULL
+                    """,
                     (jti,),
                 )
                 conn.commit()

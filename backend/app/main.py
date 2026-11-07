@@ -5,8 +5,8 @@ import logging
 import os
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddlewar
-from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, sessions, suggestions, notifications, support, public, calculs, room_live, prospects
+from fastapi.middleware.cors import CORSMiddleware
+from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, appareils, sessions, suggestions, notifications, support, public, calculs, room_live, prospects, idp, outils
 from app.db import pool_central
 from app.security.appareils import AppareilRefuse, assurer_schema as assurer_schema_appareils
 from app.security.tentatives import assurer_schema as assurer_schema_tentatives

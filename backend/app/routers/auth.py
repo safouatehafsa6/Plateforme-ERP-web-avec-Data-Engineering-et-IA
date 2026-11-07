@@ -18,6 +18,7 @@ from app.security.recaptcha import verifier_recaptcha
 from app.security.validation_inscription import valider_mot_de_passe
 from app.security import password_reset_store as reset_store
 from app.security.sessions import adresse_ip, emettre_jeton, revoquer_sessions_par_email
+from app.security.essai import controler_essai
 from app.security.audit import journaliser
 from app.utils.email_sender import envoyer_code_reinitialisation
 from fastapi.responses import JSONResponse
@@ -225,6 +226,10 @@ async def login(payload: LoginPayload, request: Request):
                     refus = _refus_si_abonnement_suspendu(entreprise_id, "externe", email, request)
                     if refus:
                         return refus
+                    refus, essai = await run_in_threadpool(
+                        controler_essai, entreprise_id, nom_base, "externe", email, request)
+                    if refus:
+                        return refus
                     reinitialiser_tentatives(email)
                     token = emettre_jeton(
                         {
@@ -239,6 +244,7 @@ async def login(payload: LoginPayload, request: Request):
                             "id": utilisateur_id, "nom": client_nom, "email": email,
                             "role": "Utilisateur", "type": "externe",
                         },
+                        "essai": essai,
                     }
         else:
             conn = pool_tenant.getconn()
@@ -266,6 +272,10 @@ async def login(payload: LoginPayload, request: Request):
                     refus = _refus_si_abonnement_suspendu(entreprise_id, "interne", email, request)
                     if refus:
                         return refus
+                    refus, essai = await run_in_threadpool(
+                        controler_essai, entreprise_id, nom_base, "interne", email, request)
+                    if refus:
+                        return refus
                     reinitialiser_tentatives(email)
                     token = emettre_jeton(
                         {
@@ -280,6 +290,7 @@ async def login(payload: LoginPayload, request: Request):
                             "id": utilisateur_id, "nom": f"{prenom} {nom}".strip(), "email": email,
                             "role": role_nom, "entrepriseId": entreprise_id,
                         },
+                        "essai": essai,
                     }
 
     if not ligne_super_admin and not ligne_index:
@@ -470,3 +481,14 @@ def reinitialiser_mot_de_passe(payload: ReinitialiserMotDePassePayload):
     reinitialiser_tentatives(email)
 
     return {"message": "Mot de passe mis à jour avec succès. Vous pouvez vous connecter."}
+
+
+# --- Statut de l'essai (affichage des connexions restantes) ---
+from fastapi import Depends as _Depends
+from app.security.auth_dependency import utilisateur_connecte as _utilisateur_connecte
+from app.security.essai import lire_statut_essai
+
+
+@router.get("/essai")
+def statut_essai(utilisateur: dict = _Depends(_utilisateur_connecte)):
+    return {"essai": lire_statut_essai(utilisateur.get("entrepriseId"))}

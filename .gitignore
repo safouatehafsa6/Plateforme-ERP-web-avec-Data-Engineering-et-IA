@@ -14,3 +14,12 @@ frontend/dist/
 frontend/node_modules/
 extraction-*.txt
 *.bak
+
+*.backup-*
+sauvegarde-lot*/
+*.diff
+analyse_*.txt
+contexte-*.txt
+diagnostic-*.txt
+verifications_*.txt
+lot*.diff

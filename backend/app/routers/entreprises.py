@@ -393,8 +393,10 @@ class ValidationPayload(BaseModel):
 
 
 @router.post("/valider")
-def valider_dossier_route(payload: ValidationPayload, _: dict = Depends(exiger_super_admin)):
-    if not _changer_statut_si(payload.entrepriseId, "valide", ("en_attente",)):
+def valider_dossier_route(payload: ValidationPayload, admin: dict = Depends(exiger_super_admin)):
+    if not _changer_statut_si(payload.entrepriseId, "valide", ("en_attente",),
+                              acteur=(admin or {}).get("email"),
+                              motif=getattr(payload, "motif", None) or "validation_manuelle"):
         return JSONResponse(status_code=409, content={
             "message": "Ce dossier ne peut pas être validé dans son état actuel.",
         })
@@ -402,24 +404,40 @@ def valider_dossier_route(payload: ValidationPayload, _: dict = Depends(exiger_s
 
 
 @router.post("/refuser")
-def refuser_dossier_route(payload: ValidationPayload, _: dict = Depends(exiger_super_admin)):
-    if not _changer_statut_si(payload.entrepriseId, "refuse", ("en_attente", "valide")):
+def refuser_dossier_route(payload: ValidationPayload, admin: dict = Depends(exiger_super_admin)):
+    if not _changer_statut_si(payload.entrepriseId, "refuse", ("en_attente", "valide"),
+                              acteur=(admin or {}).get("email"),
+                              motif=getattr(payload, "motif", None) or "refus_manuel"):
         return JSONResponse(status_code=409, content={
             "message": "Ce dossier ne peut pas être refusé dans son état actuel.",
         })
     return {"message": "Dossier refusé."}
 
 
+def _poser_contexte_historique(cur, acteur, motif):
+    """Renseigne, pour la transaction en cours seulement, l'auteur et le motif
+    lus par le trigger de historique_statut_entreprise."""
+    cur.execute(
+        "SELECT set_config('app.acteur', %s, true), set_config('app.motif', %s, true)",
+        ((acteur or "")[:150], motif or ""),
+    )
+
+
+def _email_acteur(acteur):
+    return acteur.get("email") if isinstance(acteur, dict) else None
+
+
 def _valider_dossier(entreprise_id: int) -> bool:
-    return _changer_statut_si(entreprise_id, "valide", ("en_attente",))
+    return _changer_statut_si(entreprise_id, "valide", ("en_attente",), acteur="systeme", motif="validation_automatique")
 
 
-def _changer_statut_si(entreprise_id: int, nouveau_statut: str, statuts_autorises: tuple) -> bool:
+def _changer_statut_si(entreprise_id: int, nouveau_statut: str, statuts_autorises: tuple, acteur=None, motif=None) -> bool:
     """Change le statut SEULEMENT si le statut actuel est autorise (une
     entreprise active ne peut jamais etre rebasculee par erreur ou abus)."""
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
+            _poser_contexte_historique(cur, acteur, motif)
             cur.execute(
                 "UPDATE entreprise SET statut = %s WHERE id = %s AND statut = ANY(%s) RETURNING id",
                 (nouveau_statut, entreprise_id, list(statuts_autorises)),
@@ -472,7 +490,7 @@ def confirmer_paiement(payload: PaiementPayload, acteur=Depends(_super_admin_opt
     # seule l'administration de la plateforme (ou le mode demo) peut confirmer.
     if acteur is None and not _auto_validation_active():
         raise HTTPException(status_code=403, detail="Le paiement doit être confirmé par l'administration de la plateforme.")
-    return _activer_entreprise(payload.entrepriseId)
+    return _activer_entreprise(payload.entrepriseId, _email_acteur(acteur))
 
 
 @router.post("/activer-essai")
@@ -485,10 +503,10 @@ def activer_essai(
         _exiger_jeton_inscription(payload.entrepriseId, jeton)
         if not _plan_est_essai(payload.entrepriseId):
             raise HTTPException(status_code=403, detail="Ce plan nécessite un paiement confirmé.")
-    return _activer_entreprise(payload.entrepriseId)
+    return _activer_entreprise(payload.entrepriseId, _email_acteur(acteur))
 
 
-def _activer_entreprise(entreprise_id: int):
+def _activer_entreprise(entreprise_id: int, acteur_email: str | None = None):
     admin_temp = recuperer_admin_temporaire(entreprise_id)
     if not admin_temp:
         return JSONResponse(status_code=400, content={"message": "Aucune inscription en attente pour cette entreprise."})
@@ -526,21 +544,22 @@ def _activer_entreprise(entreprise_id: int):
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("UPDATE abonnement SET statut = 'actif' WHERE entreprise_id = %s", (entreprise_id,))
+            cur.execute("UPDATE abonnement SET statut = 'actif', connexions_essai_max = CASE WHEN type_plan = 'essai' THEN 30 ELSE NULL END, connexions_essai_utilisees = 0 WHERE entreprise_id = %s", (entreprise_id,))
         conn.commit()
     finally:
         pool_central.putconn(conn)
 
-    _maj_statut(entreprise_id, "actif")
+    _maj_statut(entreprise_id, "actif", acteur_email or "inscription", "activation_compte")
     supprimer_admin_temporaire(entreprise_id)
 
     return {"message": "Votre environnement ERP est prêt.", "nomBase": nom_base}
 
 
-def _maj_statut(entreprise_id: int, statut: str) -> None:
+def _maj_statut(entreprise_id: int, statut: str, acteur: str | None = None, motif: str | None = None) -> None:
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:
+            _poser_contexte_historique(cur, acteur, motif)
             cur.execute("UPDATE entreprise SET statut = %s WHERE id = %s", (statut, entreprise_id))
         conn.commit()
     finally:

@@ -8,6 +8,7 @@ import Inscription from "./pages/Inscription";
 import MotDePasseOublie from "./pages/MotDePasseOublie";
 import TableauDeBord from "./pages/TableauDeBord";
 import AdminAbonnements from "./pages/AdminAbonnements";
+import AdminBoutons from "./pages/AdminBoutons";
 import Collaborateurs from "./pages/Collaborateurs";
 import RolesPermissions from "./pages/RolesPermissions";
 import UtilisateursExternes from "./pages/UtilisateursExternes";
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/facturation" element={<Facturation />} />
             <Route path="/comptabilite" element={<Comptabilite />} />
             <Route path="/admin/abonnements" element={<AdminAbonnements />} />
+            <Route path="/admin/boutons-flottants" element={<AdminBoutons />} />
             <Route path="/collaborateurs" element={<Collaborateurs />} />
             <Route path="/roles-permissions" element={<RolesPermissions />} />
             <Route path="/utilisateurs-externes" element={<UtilisateursExternes />} />

@@ -2331,3 +2331,65 @@ a {
 .suivi__entete time { margin-left:auto; font-size:.78rem; color:var(--text-secondary, #64748b); }
 .suivi__texte { margin:.2rem 0 0; white-space:pre-wrap; overflow-wrap:anywhere; }
 .suivi__auteur { margin:.1rem 0 0; font-size:.75rem; color:var(--text-secondary, #64748b); }
+
+/* ===== Boutons flottants configurables (administration) ===== */
+.boutons-flottants__principal { width: var(--bf-px, 58px); height: var(--bf-px, 58px); }
+.boutons-flottants__principal.a-couleur { background: var(--bf-couleur); }
+.boutons-flottants__principal.a-couleur.est-ouvert { background: var(--ink); }
+.boutons-flottants__item.a-couleur svg { color: var(--bf-couleur); }
+
+/* Positions choisies par l'administrateur (« auto » = comportement d'origine, sans classe). */
+.boutons-flottants.boutons-flottants--bas-droite, .boutons-flottants.boutons-flottants--milieu-droite, .boutons-flottants.boutons-flottants--haut-droite { right: 22px; left: auto; }
+.boutons-flottants.boutons-flottants--bas-gauche, .boutons-flottants.boutons-flottants--milieu-gauche, .boutons-flottants.boutons-flottants--haut-gauche { left: 22px; right: auto; }
+.boutons-flottants.boutons-flottants--bas-droite > *, .boutons-flottants.boutons-flottants--milieu-droite > *, .boutons-flottants.boutons-flottants--haut-droite > * { margin-inline: 0; margin-left: auto; }
+.boutons-flottants.boutons-flottants--bas-gauche > *, .boutons-flottants.boutons-flottants--milieu-gauche > *, .boutons-flottants.boutons-flottants--haut-gauche > * { margin-inline: 0; margin-right: auto; }
+.boutons-flottants.boutons-flottants--haut-droite, .boutons-flottants.boutons-flottants--haut-gauche {
+  top: 88px; bottom: auto; flex-direction: column-reverse;   /* sous l'en-tête ; le menu s'ouvre vers le bas */
+}
+.boutons-flottants.boutons-flottants--milieu-droite, .boutons-flottants.boutons-flottants--milieu-gauche { top: 50%; bottom: auto; transform: translateY(-50%); }
+.boutons-flottants--haut-droite .boutons-flottants__menu, .boutons-flottants--haut-gauche .boutons-flottants__menu { transform-origin: top right; }
+
+/* Boutons « libres » : isolés, à l'ancrage choisi ; décalés si le menu d'aide occupe déjà le même coin. */
+.boutons-libres { position: fixed; z-index: 1090; display: flex; flex-direction: column; gap: 10px; }
+.boutons-libres--bas-droite, .boutons-libres--milieu-droite, .boutons-libres--haut-droite { right: 22px; align-items: flex-end; }
+.boutons-libres--bas-gauche, .boutons-libres--milieu-gauche, .boutons-libres--haut-gauche { left: 22px; align-items: flex-start; }
+.boutons-libres--bas-droite, .boutons-libres--bas-gauche { bottom: calc(22px + env(safe-area-inset-bottom, 0px)); flex-direction: column-reverse; }
+.boutons-libres--haut-droite, .boutons-libres--haut-gauche { top: 88px; }
+.boutons-libres--milieu-droite, .boutons-libres--milieu-gauche { top: 50%; transform: translateY(-50%); }
+.boutons-libres--decale.boutons-libres--bas-droite, .boutons-libres--decale.boutons-libres--bas-gauche { bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+.boutons-libres--decale.boutons-libres--haut-droite, .boutons-libres--decale.boutons-libres--haut-gauche { top: 160px; }
+.boutons-libres--decale.boutons-libres--milieu-droite, .boutons-libres--decale.boutons-libres--milieu-gauche { top: calc(50% + 60px); }
+.boutons-libres__bouton {
+  position: relative; width: var(--bf-px, 58px); height: var(--bf-px, 58px);
+  display: grid; place-items: center; border: 0; border-radius: 50%; cursor: pointer; text-decoration: none;
+  background: var(--bf-couleur, linear-gradient(135deg, var(--brass), var(--brass-dark))); color: #fff;
+  box-shadow: 0 8px 22px rgba(14, 34, 51, 0.3); transition: transform 0.2s cubic-bezier(.2,.8,.2,1), box-shadow 0.2s;
+}
+.boutons-libres__bouton:hover { transform: translateY(-3px) scale(1.06); box-shadow: 0 12px 28px rgba(14, 34, 51, 0.36); }
+.boutons-libres__bouton:focus-visible { outline: 3px solid color-mix(in srgb, var(--brass) 55%, #fff); outline-offset: 3px; }
+@media print { .boutons-libres { display: none; } }
+
+/* ===== Page d'administration des boutons flottants ===== */
+.bfadmin-grille { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-bottom: 1.25rem; }
+.bfadmin-carte { padding: 1rem 1.1rem; }
+.bfadmin-carte h3 { margin: 0 0 .75rem; font-size: 1rem; }
+.bfadmin-positions { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 34px); gap: 6px; padding: 8px; border: 1px solid var(--paper-line); border-radius: 10px; background: color-mix(in srgb, var(--paper-line) 25%, transparent); max-width: 220px; }
+.bfadmin-position { border: 1px dashed var(--paper-line); border-radius: 8px; background: var(--carte-fond); cursor: pointer; display: grid; place-items: center; font-size: .7rem; color: var(--text-secondary, #64748b); }
+.bfadmin-position[aria-pressed="true"] { background: var(--brass); color: #fff; border-style: solid; border-color: var(--brass-dark); }
+.bfadmin-position:focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+.bfadmin-ligne-flex { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; }
+.bfadmin-pastille { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: #fff; background: var(--bf-couleur, linear-gradient(135deg, var(--brass), var(--brass-dark))); flex: none; }
+.bfadmin-interrupteur { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; font-size: .85rem; }
+.bfadmin-table td { vertical-align: middle; }
+.bfadmin-ordre { display: inline-flex; flex-direction: column; gap: 2px; }
+.bfadmin-ordre button { border: 1px solid var(--paper-line); background: var(--carte-fond); color: inherit; border-radius: 6px; width: 26px; height: 20px; display: grid; place-items: center; cursor: pointer; padding: 0; }
+.bfadmin-ordre button:disabled { opacity: .35; cursor: default; }
+.bfadmin-aide { font-size: .78rem; color: var(--text-secondary, #64748b); margin: .25rem 0 0; }
+.bfadmin-apercu { display: flex; align-items: center; gap: .6rem; padding: .6rem .8rem; border: 1px dashed var(--paper-line); border-radius: 12px; margin-bottom: .75rem; }
+.bfadmin-choix { display: flex; flex-wrap: wrap; gap: .75rem; }
+.bfadmin-choix label { display: inline-flex; align-items: center; gap: .35rem; font-size: .85rem; }
+.bfadmin-icones { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px; max-height: 150px; overflow-y: auto; padding: 4px; }
+.bfadmin-icone { height: 38px; display: grid; place-items: center; border: 1px solid var(--paper-line); border-radius: 8px; background: var(--carte-fond); color: inherit; cursor: pointer; }
+.bfadmin-icone[aria-pressed="true"] { background: var(--brass); color: #fff; border-color: var(--brass-dark); }
+.bfadmin-hist li { margin: .25rem 0; font-size: .85rem; }
+@media (max-width: 640px) { .bfadmin-table th:nth-child(4), .bfadmin-table td:nth-child(4) { display: none; } }

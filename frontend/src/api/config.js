@@ -1,8 +1,12 @@
 
 // Centralise l'URL de base de l'API pour ne jamais la répéter dans le code.
 // L'API est accessible depuis Windows et Rocky Linux via l'adresse IP de la VM.
+// Par defaut, l'API est jointe sur la MEME machine que celle qui sert la page
+// (window.location.hostname) : "localhost" en local, l'IP de la VM sinon.
+// "http://localhost:8000" en dur pointait vers le PC Windows, pas vers la VM.
 export const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8000/api";
+  import.meta.env.VITE_API_URL ||
+  `${window.location.protocol}//${window.location.hostname}:8000/api`;
 
 // Identifiant aleatoire de CE navigateur, cree une fois et conserve. Il est
 // envoye a la connexion (en-tete X-Appareil-Id) pour reconnaitre l'appareil ;

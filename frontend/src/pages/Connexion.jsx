@@ -57,7 +57,7 @@ export default function Connexion() {
       navigate(estUtilisateurExterne(lireSession()) ? "/portail" : "/dashboard");
     } catch (err) {
       const infos = err.data || {};
-      setErreur(infos.message || t("erreur_identifiants"));
+      setErreur(infos.message || (err instanceof TypeError ? t("erreur_reseau") : t("erreur_identifiants")));
 
       if (infos.requiresCaptcha) {
         setAfficherCaptcha(true);

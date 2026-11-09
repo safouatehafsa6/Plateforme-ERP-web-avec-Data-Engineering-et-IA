@@ -46,6 +46,7 @@ const resources = {
       se_connecter: "Se connecter",
       mot_de_passe_oublie: "Mot de passe oublié ?",
       erreur_identifiants: "Adresse e-mail ou mot de passe incorrect.",
+      erreur_reseau: "Serveur injoignable : vérifiez que le backend est démarré et accessible.",
       marque_titre: "Une plateforme, toute votre entreprise",
       marque_texte: "Ventes, achats, stock et facturation réunis dans un seul espace, pour chacune de vos équipes.",
       tableau_de_bord: "Tableau de bord",
@@ -156,6 +157,7 @@ const resources = {
       // Administration (abonnements, collaborateurs, rôles)
       chargement: "Chargement...",
       admin_abonnements_titre: "Abonnements",
+      admin_boutons_titre: "Boutons flottants",
       colonne_entreprise: "Entreprise",
       colonne_type: "Type",
       colonne_email: "Email",
@@ -231,6 +233,7 @@ const resources = {
       se_connecter: "Sign in",
       mot_de_passe_oublie: "Forgot your password?",
       erreur_identifiants: "Incorrect email or password.",
+      erreur_reseau: "Server unreachable: check that the backend is running and reachable.",
       marque_titre: "One platform, your whole business",
       marque_texte: "Sales, purchasing, stock and invoicing brought together for every team.",
       tableau_de_bord: "Dashboard",
@@ -339,6 +342,7 @@ const resources = {
 
       chargement: "Loading...",
       admin_abonnements_titre: "Subscriptions",
+      admin_boutons_titre: "Floating buttons",
       colonne_entreprise: "Company",
       colonne_type: "Type",
       colonne_email: "Email",
@@ -414,6 +418,7 @@ const resources = {
       se_connecter: "تسجيل الدخول",
       mot_de_passe_oublie: "هل نسيت كلمة المرور؟",
       erreur_identifiants: "البريد الإلكتروني أو كلمة المرور غير صحيحة.",
+      erreur_reseau: "تعذر الوصول إلى الخادم: تأكد من تشغيل الواجهة الخلفية.",
       marque_titre: "منصة واحدة لكل مؤسستك",
       marque_texte: "المبيعات والمشتريات والمخزون والفواتير في مكان واحد لكل فرق العمل.",
       tableau_de_bord: "لوحة التحكم",
@@ -522,6 +527,7 @@ const resources = {
 
       chargement: "جاري التحميل...",
       admin_abonnements_titre: "الاشتراكات",
+      admin_boutons_titre: "الأزرار العائمة",
       colonne_entreprise: "الشركة",
       colonne_type: "النوع",
       colonne_email: "البريد الإلكتروني",

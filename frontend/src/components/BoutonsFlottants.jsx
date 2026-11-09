@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Bot, ChevronDown, Headset, MessageCircle, LogIn, UserPlus, X, Bell, CheckCheck, ArrowLeft, LoaderCircle, Moon, Sun, Globe } from "lucide-react";
+import { ChevronDown, X, CheckCheck, ArrowLeft, LoaderCircle, Sun } from "lucide-react";
 import { lireSession } from "../api/session";
 import { API_BASE_URL } from "../api/config";
 import { useLangue } from "../context/LangueContext";
 import { useTheme } from "../context/ThemeContext";
+import useBoutonsFlottants from "../hooks/useBoutonsFlottants";
+import { TAILLES_PX, boutonVisible, positionEffective, titreBouton, trierBoutons } from "../validation/boutonsFlottants";
+import { iconeBouton } from "./iconesBoutons";
 import AssistantIA from "./AssistantIA";
 
 const TEXTES = {
@@ -15,6 +18,7 @@ const TEXTES = {
 };
 
 const PUBLIC_ROUTES = new Set(["/", "/inscription", "/mot-de-passe-oublie", "/fonctionnalites", "/tarifs", "/contact"]);
+const requeteMobile = () => typeof window !== "undefined" && window.matchMedia?.("(max-width: 768px)").matches;
 
 export default function BoutonsFlottants() {
   const { i18n } = useTranslation();
@@ -29,6 +33,8 @@ export default function BoutonsFlottants() {
   const [chargementNotifications, setChargementNotifications] = useState(false);
   const [erreurNotifications, setErreurNotifications] = useState("");
   const [assistantOuvert, setAssistantOuvert] = useState(false);
+  const [mobile, setMobile] = useState(requeteMobile);
+  const { config, boutons: boutonsConfig } = useBoutonsFlottants();
   const session = useMemo(() => lireSession(), [location.pathname]);
   const langue = (langueActuelle?.code || i18n.language || "fr").split("-")[0];
   const rtl = langue === "ar";
@@ -37,10 +43,28 @@ export default function BoutonsFlottants() {
   const whatsappNumber = (import.meta.env.VITE_WHATSAPP_NUMBER || "").replace(/\D/g, "");
 
   useEffect(() => {
+    const mq = window.matchMedia?.("(max-width: 768px)");
+    if (!mq) return undefined;
+    const maj = () => setMobile(mq.matches);
+    mq.addEventListener("change", maj);
+    return () => mq.removeEventListener("change", maj);
+  }, []);
+
+  // Boutons à afficher ici et maintenant (audience, profil, appareil, pages, période), puis répartis
+  // entre le menu d'aide (placement « menu ») et les boutons isolés (placement « libre »).
+  const visibles = useMemo(() => trierBoutons(boutonsConfig).filter((b) => boutonVisible(b, {
+    session, pathname: location.pathname, mobile, maintenant: new Date(), numeroWhatsapp: whatsappNumber,
+  })), [boutonsConfig, session, location.pathname, mobile, whatsappNumber]);
+  const boutonsMenu = visibles.filter((b) => b.placement !== "libre");
+  const boutonsLibres = visibles.filter((b) => b.placement === "libre");
+  const aNotifications = visibles.some((b) => b.action === "notifications");
+  const positionPrincipale = positionEffective(config.position, rtl);
+
+  useEffect(() => {
     setMenuOuvert(false);
     setAssistantOuvert(false);
     setNotificationsOuvertes(false);
-    if (estPublic || !session) return;
+    if (!session || !aNotifications) return;
 
     void chargerNotifications();
     const actualiser = () => { void chargerNotifications(); };
@@ -61,7 +85,7 @@ export default function BoutonsFlottants() {
       window.removeEventListener("focus", actualiser);
       document.removeEventListener("visibilitychange", actualiserAuRetour);
     };
-  }, [location.pathname, langue, estPublic, Boolean(session)]);
+  }, [location.pathname, langue, aNotifications, Boolean(session)]);
 
   async function chargerNotifications() {
     const token = localStorage.getItem("token");
@@ -146,85 +170,162 @@ export default function BoutonsFlottants() {
     setAssistantOuvert(true);
   }
 
-  return (
-    <div className={`boutons-flottants${rtl ? " boutons-flottants--rtl" : ""}`} dir={rtl ? "rtl" : "ltr"}>
-      {menuOuvert && (
-        <section className="boutons-flottants__menu" aria-label={notificationsOuvertes ? ui.notifications : ui.title}>
-          <div className="boutons-flottants__menu-titre">
-            {notificationsOuvertes ? <button type="button" onClick={() => setNotificationsOuvertes(false)} aria-label={ui.back}><ArrowLeft size={17} /></button> : null}
-            <span>{notificationsOuvertes ? ui.notifications : ui.title}</span>
-            <button type="button" onClick={() => { setMenuOuvert(false); setNotificationsOuvertes(false); }} aria-label={ui.close}><X size={17} /></button>
-          </div>
-          {notificationsOuvertes ? (
-            <div className="boutons-flottants__notifications">
-              {notificationsNonLues > 0 && <button type="button" className="boutons-flottants__tout-lire" onClick={marquerToutesLues}><CheckCheck size={15} />{ui.markAll}</button>}
-              {chargementNotifications ? <p className="boutons-flottants__note"><LoaderCircle className="boutons-flottants__spinner" size={16} /> {ui.loading}</p> : null}
-              {erreurNotifications ? <p className="boutons-flottants__erreur" role="alert">{erreurNotifications}</p> : null}
-              {!chargementNotifications && !erreurNotifications && notifications.length === 0 ? <p className="boutons-flottants__note">{ui.empty}</p> : null}
-              {notifications.map((n) => (
-                <article key={n.id} className={`boutons-flottants__notification${n.lue ? " est-lue" : " est-non-lue"}`}>
-                  <button type="button" className="boutons-flottants__notification-contenu" onClick={() => ouvrirLienNotification(n)}>
-                    <span className={`boutons-flottants__notification-point categorie-${n.categorie || "info"}`} />
-                    <span className="boutons-flottants__notification-texte"><strong>{n.titre}</strong><span>{n.message}</span><small>{n.creeLe ? new Date(n.creeLe).toLocaleString(langue === "ar" ? "ar" : langue === "en" ? "en" : "fr") : ""}</small></span>
-                  </button>
-                  {!n.lue && <button type="button" className="boutons-flottants__notification-lire" onClick={() => marquerLue(n)} aria-label={ui.markRead} title={ui.markRead}><CheckCheck size={15} /></button>}
-                </article>
-              ))}
-            </div>
-          ) : <>
-          {!estPublic && session && (
-            <button type="button" className="boutons-flottants__item" onClick={ouvrirNotifications}>
-              <Bell size={19} /><span>{ui.notifications}</span>
-              {notificationsNonLues > 0 && <span className="boutons-flottants__badge">{notificationsNonLues > 99 ? "99+" : notificationsNonLues}</span>}
-            </button>
-          )}
-          {!estPublic && session && (
-            <button type="button" className="boutons-flottants__item" onClick={ouvrirAssistant}>
-              <Bot size={19} /><span>{ui.assistant}</span>
-            </button>
-          )}
-          <button type="button" className="boutons-flottants__item" onClick={ouvrirSupport}>
-            <Headset size={19} /><span>{ui.support}</span>
+  // Exécute l'action d'un bouton « libre » (le menu d'aide gère les siens dans son propre rendu).
+  function actionLibre(b) {
+    if (b.action === "assistant") ouvrirAssistant();
+    else if (b.action === "notifications") { setMenuOuvert(true); void ouvrirNotifications(); }
+    else if (b.action === "support") ouvrirSupport();
+    else if (b.action === "theme") basculerTheme();
+    else if (b.action === "langue") {
+      const codes = langues.map((l) => l.code);
+      changerLangue(codes[(codes.indexOf(langueActuelle.code) + 1) % codes.length]);
+    }
+  }
+
+  function styleCouleur(b) {
+    return b.couleur ? { "--bf-couleur": b.couleur } : undefined;
+  }
+
+  // Élément du menu d'aide selon l'action configurée.
+  function elementMenu(b) {
+    const Icone = iconeBouton(b.icone);
+    const titre = titreBouton(b, langue);
+    const icone = <Icone size={19} />;
+    const classe = `boutons-flottants__item${b.couleur ? " a-couleur" : ""}`;
+    switch (b.action) {
+      case "notifications":
+        return (
+          <button key={b.id} type="button" className={classe} style={styleCouleur(b)} onClick={ouvrirNotifications}>
+            {icone}<span>{titre}</span>
+            {notificationsNonLues > 0 && <span className="boutons-flottants__badge">{notificationsNonLues > 99 ? "99+" : notificationsNonLues}</span>}
           </button>
-          {whatsappNumber && (
-            <a className="boutons-flottants__item" href={`https://wa.me/${whatsappNumber}`} target="_blank" rel="noopener noreferrer">
-              <MessageCircle size={19} /><span>{ui.whatsapp}</span>
-            </a>
-          )}
-          {estPublic && <>
-            <Link className="boutons-flottants__item" to="/" onClick={() => setMenuOuvert(false)}><LogIn size={19} /><span>{ui.login}</span></Link>
-            <Link className="boutons-flottants__item" to="/inscription" onClick={() => setMenuOuvert(false)}><UserPlus size={19} /><span>{ui.signup}</span></Link>
-          </>}
-          {!session && !estPublic && <Link className="boutons-flottants__item" to="/" onClick={() => setMenuOuvert(false)}><LogIn size={19} /><span>{ui.login}</span></Link>}
-          <div className="boutons-flottants__reglages">
-            <button type="button" className="boutons-flottants__item boutons-flottants__item--theme" onClick={basculerTheme} aria-pressed={theme === "sombre"}>
-              {theme === "sombre" ? <Sun size={19} /> : <Moon size={19} />}<span>{theme === "sombre" ? ui.light : ui.dark}</span>
-            </button>
-            <div className="boutons-flottants__langues" role="group" aria-label={ui.language}>
-              <Globe size={17} />
+        );
+      case "assistant":
+        return <button key={b.id} type="button" className={classe} style={styleCouleur(b)} onClick={ouvrirAssistant}>{icone}<span>{titre}</span></button>;
+      case "support":
+        return <button key={b.id} type="button" className={classe} style={styleCouleur(b)} onClick={ouvrirSupport}>{icone}<span>{titre}</span></button>;
+      case "theme":
+        return (
+          <button key={b.id} type="button" className={`${classe} boutons-flottants__item--theme`} style={styleCouleur(b)} onClick={basculerTheme} aria-pressed={theme === "sombre"}>
+            {theme === "sombre" ? <Sun size={19} /> : <Icone size={19} />}<span>{theme === "sombre" ? ui.light : ui.dark}</span>
+          </button>
+        );
+      case "langue":
+        return (
+          <div key={b.id} className="boutons-flottants__reglages">
+            <div className="boutons-flottants__langues" role="group" aria-label={titre}>
+              {icone}
               {langues.map((l) => (
                 <button key={l.code} type="button" aria-pressed={langueActuelle.code === l.code} onClick={() => changerLangue(l.code)}>{l.code.toUpperCase()}</button>
               ))}
             </div>
           </div>
-          </>}
-        </section>
+        );
+      case "whatsapp": {
+        const numero = String(b.cible || whatsappNumber).replace(/\D/g, "");
+        return (
+          <a key={b.id} className={classe} style={styleCouleur(b)} href={`https://wa.me/${numero}`} target={b.nouvel_onglet ? "_blank" : undefined} rel="noopener noreferrer">
+            {icone}<span>{titre}</span>
+          </a>
+        );
+      }
+      case "route":
+        return <Link key={b.id} className={classe} style={styleCouleur(b)} to={b.cible || "/"} onClick={() => setMenuOuvert(false)}>{icone}<span>{titre}</span></Link>;
+      case "url":
+        return (
+          <a key={b.id} className={classe} style={styleCouleur(b)} href={b.cible} target={b.nouvel_onglet ? "_blank" : undefined} rel="noopener noreferrer">
+            {icone}<span>{titre}</span>
+          </a>
+        );
+      default:
+        return null;
+    }
+  }
+
+  // Bouton isolé : même action, affiché seul à l'ancrage choisi.
+  function elementLibre(b) {
+    const Icone = iconeBouton(b.icone);
+    const titre = titreBouton(b, langue);
+    const px = TAILLES_PX[b.taille] || TAILLES_PX.moyen;
+    const style = { "--bf-px": `${px}px`, ...(b.couleur ? { "--bf-couleur": b.couleur } : {}) };
+    const contenu = <><Icone size={Math.round(px * 0.4)} />{b.action === "notifications" && notificationsNonLues > 0 && <span className="boutons-flottants__principal-badge">{notificationsNonLues > 99 ? "99+" : notificationsNonLues}</span>}</>;
+    const classe = `boutons-libres__bouton${b.couleur ? " a-couleur" : ""}`;
+    if (b.action === "route") return <Link key={b.id} className={classe} style={style} to={b.cible || "/"} title={titre} aria-label={titre}>{contenu}</Link>;
+    if (b.action === "url") return <a key={b.id} className={classe} style={style} href={b.cible} target={b.nouvel_onglet ? "_blank" : undefined} rel="noopener noreferrer" title={titre} aria-label={titre}>{contenu}</a>;
+    if (b.action === "whatsapp") {
+      return <a key={b.id} className={classe} style={style} href={`https://wa.me/${String(b.cible || whatsappNumber).replace(/\D/g, "")}`} target={b.nouvel_onglet ? "_blank" : undefined} rel="noopener noreferrer" title={titre} aria-label={titre}>{contenu}</a>;
+    }
+    return <button key={b.id} type="button" className={classe} style={style} onClick={() => actionLibre(b)} title={titre} aria-label={titre}>{contenu}</button>;
+  }
+
+  const libresParPosition = boutonsLibres.reduce((acc, b) => { (acc[b.position] ||= []).push(b); return acc; }, {});
+  const principalAffiche = config.actif && boutonsMenu.length > 0;
+  const tailleMenu = TAILLES_PX[config.taille] || TAILLES_PX.moyen;
+  const classePosition = config.position && config.position !== "auto" ? ` boutons-flottants--${config.position}` : "";
+  const stylePrincipal = { "--bf-px": `${tailleMenu}px`, ...(config.couleur ? { "--bf-couleur": config.couleur } : {}) };
+  const IconePrincipale = iconeBouton(config.icone);
+
+  if (!config.actif) return null;
+
+  return (
+    <>
+      {(principalAffiche || menuOuvert) && (
+        <div className={`boutons-flottants${rtl ? " boutons-flottants--rtl" : ""}${classePosition}`} dir={rtl ? "rtl" : "ltr"} style={stylePrincipal}>
+          {menuOuvert && (
+            <section className="boutons-flottants__menu" aria-label={notificationsOuvertes ? ui.notifications : ui.title}>
+              <div className="boutons-flottants__menu-titre">
+                {notificationsOuvertes ? <button type="button" onClick={() => setNotificationsOuvertes(false)} aria-label={ui.back}><ArrowLeft size={17} /></button> : null}
+                <span>{notificationsOuvertes ? ui.notifications : ui.title}</span>
+                <button type="button" onClick={() => { setMenuOuvert(false); setNotificationsOuvertes(false); }} aria-label={ui.close}><X size={17} /></button>
+              </div>
+              {notificationsOuvertes ? (
+                <div className="boutons-flottants__notifications">
+                  {notificationsNonLues > 0 && <button type="button" className="boutons-flottants__tout-lire" onClick={marquerToutesLues}><CheckCheck size={15} />{ui.markAll}</button>}
+                  {chargementNotifications ? <p className="boutons-flottants__note"><LoaderCircle className="boutons-flottants__spinner" size={16} /> {ui.loading}</p> : null}
+                  {erreurNotifications ? <p className="boutons-flottants__erreur" role="alert">{erreurNotifications}</p> : null}
+                  {!chargementNotifications && !erreurNotifications && notifications.length === 0 ? <p className="boutons-flottants__note">{ui.empty}</p> : null}
+                  {notifications.map((n) => (
+                    <article key={n.id} className={`boutons-flottants__notification${n.lue ? " est-lue" : " est-non-lue"}`}>
+                      <button type="button" className="boutons-flottants__notification-contenu" onClick={() => ouvrirLienNotification(n)}>
+                        <span className={`boutons-flottants__notification-point categorie-${n.categorie || "info"}`} />
+                        <span className="boutons-flottants__notification-texte"><strong>{n.titre}</strong><span>{n.message}</span><small>{n.creeLe ? new Date(n.creeLe).toLocaleString(langue === "ar" ? "ar" : langue === "en" ? "en" : "fr") : ""}</small></span>
+                      </button>
+                      {!n.lue && <button type="button" className="boutons-flottants__notification-lire" onClick={() => marquerLue(n)} aria-label={ui.markRead} title={ui.markRead}><CheckCheck size={15} /></button>}
+                    </article>
+                  ))}
+                </div>
+              ) : boutonsMenu.map(elementMenu)}
+            </section>
+          )}
+
+          {principalAffiche && (
+            <button
+              type="button"
+              className={`boutons-flottants__principal${menuOuvert ? " est-ouvert" : ""}${config.couleur ? " a-couleur" : ""}`}
+              onClick={() => setMenuOuvert((ouvert) => !ouvert)}
+              aria-label={menuOuvert ? ui.close : ui.menu}
+              aria-expanded={menuOuvert}
+              title={menuOuvert ? ui.close : ui.menu}
+            >
+              {menuOuvert ? <X size={23} /> : <IconePrincipale size={23} />}
+              {!menuOuvert && notificationsNonLues > 0 && session && aNotifications && <span className="boutons-flottants__principal-badge">{notificationsNonLues > 99 ? "99+" : notificationsNonLues}</span>}
+              <span className="boutons-flottants__chevron"><ChevronDown size={14} /></span>
+            </button>
+          )}
+        </div>
       )}
 
-      <button
-        type="button"
-        className={`boutons-flottants__principal${menuOuvert ? " est-ouvert" : ""}`}
-        onClick={() => setMenuOuvert((ouvert) => !ouvert)}
-        aria-label={menuOuvert ? ui.close : ui.menu}
-        aria-expanded={menuOuvert}
-        title={menuOuvert ? ui.close : ui.menu}
-      >
-        {menuOuvert ? <X size={23} /> : <Headset size={23} />}
-        {!menuOuvert && notificationsNonLues > 0 && session && <span className="boutons-flottants__principal-badge">{notificationsNonLues > 99 ? "99+" : notificationsNonLues}</span>}
-        <span className="boutons-flottants__chevron"><ChevronDown size={14} /></span>
-      </button>
+      {Object.entries(libresParPosition).map(([position, liste]) => (
+        <div
+          key={position}
+          className={`boutons-libres boutons-libres--${position}${position === positionPrincipale && principalAffiche ? " boutons-libres--decale" : ""}`}
+          dir={rtl ? "rtl" : "ltr"}
+        >
+          {liste.map(elementLibre)}
+        </div>
+      ))}
 
       {assistantOuvert && <AssistantIA open={assistantOuvert} onClose={() => setAssistantOuvert(false)} />}
-    </div>
+    </>
   );
 }

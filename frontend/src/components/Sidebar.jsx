@@ -2,7 +2,7 @@ import { useLocation, Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import {
   LayoutDashboard, ShoppingCart, Truck, Boxes, Users,
-  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, UserPlus, ShieldCheck, Contact, Bot, Activity, Monitor, Calculator, Video,
+  FileText, Wallet, Settings, LogOut, CreditCard, UserCog, UserPlus, MousePointerClick, ShieldCheck, Contact, Bot, Activity, Monitor, Calculator, Video,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { lireSession, estAdminEntreprise, estSuperAdmin, estProfilEntreprise } from "../api/session";
@@ -33,6 +33,7 @@ const ITEMS = [
   { icon: ShieldCheck, label: "roles_permissions_titre", chemin: "/roles-permissions", visible: estAdminEntreprise },
   { icon: Contact, label: "utilisateurs_externes_titre", chemin: "/utilisateurs-externes", visible: estAdminEntreprise },
   { icon: CreditCard, label: "admin_abonnements_titre", chemin: "/admin/abonnements", visible: estSuperAdmin },
+  { icon: MousePointerClick, label: "admin_boutons_titre", chemin: "/admin/boutons-flottants", visible: estSuperAdmin },
 ];
 
 export default function Sidebar() {

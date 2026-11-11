@@ -14,6 +14,7 @@ from urllib.parse import quote
 from app.security.auth_dependency import utilisateur_connecte
 from app.security.sessions import verifier_session
 from app.schemas.room_live import RoomCreate, RoomInvite, RoomUpdate, ParticipantRoleUpdate
+from app.services import room_recording, room_store
 from app.services.room_manager import room_manager
 from app.services.room_summary import resumer
 from app.utils.email_sender import envoyer_email
@@ -52,6 +53,7 @@ def _require_manager(user, room):
 
 @router.get("/rooms")
 def list_rooms(user: dict = Depends(utilisateur_connecte)):
+    room_manager.hydrate(user)
     result = []
     for room in list(room_manager.rooms.values()):
         if room["tenant"] == room_manager.tenant(user):
@@ -88,6 +90,7 @@ async def invite_room(room_id: str, payload: RoomInvite, user: dict = Depends(ut
     if not _EMAIL_RE.match(email):
         raise HTTPException(status_code=400, detail="Adresse e-mail invalide.")
     expire = room_manager.invite(room, email)
+    await room_manager.persist(room_store.enregistrer_invitation, room, email, expire)
 
     nom_salle = re.sub(r"[\r\n]+", " ", room["name"]).strip()
     lien = f"{FRONTEND_PUBLIC_URL}/room-live?room={room_id}"
@@ -130,6 +133,7 @@ async def update_room(room_id: str, payload: RoomUpdate, user: dict = Depends(ut
         room["description"] = changes["description"].strip()
     if "is_private" in changes:
         room["is_private"] = changes["is_private"]
+    await room_manager.persist(room_store.enregistrer_salle, room)
     public = room_manager.public_room(room)
     await room_manager.broadcast(room_id, {"type": "room_updated", "room": public})
     return {"room": public}
@@ -139,6 +143,7 @@ async def update_room(room_id: str, payload: RoomUpdate, user: dict = Depends(ut
 async def close_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
     room = _require_room(user, room_id, member=True)
     _require_host(user, room)
+    await room_recording.arreter(room, user, "termine")
     await room_manager.broadcast(room_id, {"type": "room_closed", "room_id": room_id})
     for socket in list(room_manager.connections.get(room_id, {}).values()):
         try:
@@ -149,6 +154,7 @@ async def close_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
     room_manager.connections.pop(room_id, None)
     for file_id in [fid for fid, item in room_manager.files.items() if item["room_id"] == room_id]:
         room_manager.files.pop(file_id, None)
+    await room_manager.persist(room_store.fermer_salle, room["db"], room_id)
     return {"message": "Salle fermée."}
 
 
@@ -159,6 +165,7 @@ async def revoke_invitation(room_id: str, email: str, user: dict = Depends(utili
     normalized = email.strip().lower()
     room["invited_emails"].discard(normalized)
     room.get("invite_expiry", {}).pop(normalized, None)
+    await room_manager.persist(room_store.supprimer_invitation, room, normalized)
     return {"message": "Invitation révoquée."}
 
 
@@ -202,6 +209,8 @@ async def remove_participant(room_id: str, participant_id: str, user: dict = Dep
     if room["participants"].get(participant_id, {}).get("role") == "cohost" and room["owner_id"] != _uid(user):
         raise HTTPException(status_code=403, detail="Un co-hôte ne peut pas retirer un autre co-hôte.")
     room["participants"].pop(participant_id, None)
+    await room_manager.persist(room_store.retirer_participant, room, participant_id)
+    await room_recording.interrompre_si_enregistreur(room, participant_id)
     socket = room_manager.connections.get(room_id, {}).pop(participant_id, None)
     if socket:
         try:
@@ -223,6 +232,8 @@ async def block_participant(room_id: str, participant_id: str, user: dict = Depe
     if participant.get("role") == "cohost" and room["owner_id"] != _uid(user):
         raise HTTPException(status_code=403, detail="Un co-hôte ne peut pas bloquer un autre co-hôte.")
     participant["blocked"] = True
+    await room_manager.persist(room_store.enregistrer_participant, room, participant)
+    await room_recording.interrompre_si_enregistreur(room, participant_id)
     socket = room_manager.connections.get(room_id, {}).pop(participant_id, None)
     if socket:
         try:
@@ -235,7 +246,8 @@ async def block_participant(room_id: str, participant_id: str, user: dict = Depe
 
 @router.post("/rooms/{room_id}/leave")
 async def leave_room(room_id: str, user: dict = Depends(utilisateur_connecte)):
-    _require_room(user, room_id, member=True)
+    room = _require_room(user, room_id, member=True)
+    await room_recording.interrompre_si_enregistreur(room, _uid(user))
     await room_manager.leave(room_id, _uid(user))
     remaining = room_manager.rooms.get(room_id)
     await room_manager.broadcast(room_id, {
@@ -289,6 +301,17 @@ def _websocket_user(token: str):
         return None
 
 
+DELAI_RECONNEXION_ENREGISTREUR = 20  # secondes de tolérance avant d'interrompre l'enregistrement
+
+
+async def _interrompre_apres_delai(room_id: str, uid: str):
+    """Si la personne qui enregistre ne se reconnecte pas à temps, l'enregistrement est clos."""
+    await asyncio.sleep(DELAI_RECONNEXION_ENREGISTREUR)
+    room = room_manager.rooms.get(room_id)
+    if room and uid not in room_manager.connections.get(room_id, {}):
+        await room_recording.interrompre_si_enregistreur(room, uid)
+
+
 @router.websocket("/ws/{room_id}")
 async def room_websocket(websocket: WebSocket, room_id: str, token: str = ""):
     user = _websocket_user(token)
@@ -305,6 +328,8 @@ async def room_websocket(websocket: WebSocket, room_id: str, token: str = ""):
     await room_manager.broadcast(room_id, {"type": "presence", "user_id": uid, "status": "joined"}, exclude=uid)
     await websocket.send_json({"type": "history", "messages": room["messages"][-100:]})
     await websocket.send_json({"type": "participants", "room": room_manager.public_room(room)})
+    if room_recording.actif(room):
+        await websocket.send_json({"type": "recording_started", "recording": room_recording.public(room["recording"])})
     try:
         while True:
             data = await websocket.receive_json()
@@ -329,6 +354,7 @@ async def room_websocket(websocket: WebSocket, room_id: str, token: str = ""):
                 }
                 room["messages"].append(message)
                 room["messages"] = room["messages"][-200:]
+                await room_manager.persist(room_store.enregistrer_message, room, message)
                 await room_manager.broadcast(room_id, {"type": "chat", "message": message})
             elif kind in ("offer", "answer", "ice-candidate"):
                 if kind == "offer" and room["participants"].get(uid, {}).get("role") == "observer":
@@ -349,3 +375,6 @@ async def room_websocket(websocket: WebSocket, room_id: str, token: str = ""):
         if room_manager.connections.get(room_id, {}).get(uid) is websocket:
             room_manager.connections.get(room_id, {}).pop(uid, None)
         await room_manager.broadcast(room_id, {"type": "presence", "user_id": uid, "status": "left"})
+        room_now = room_manager.rooms.get(room_id)
+        if room_now and room_recording.actif(room_now) and room_now["recording"]["started_by_id"] == uid:
+            asyncio.create_task(_interrompre_apres_delai(room_id, uid))

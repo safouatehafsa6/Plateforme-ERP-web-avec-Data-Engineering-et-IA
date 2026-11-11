@@ -3,12 +3,14 @@ import { useTranslation } from "react-i18next";
 import {
   Video, VideoOff, Mic, MicOff, MonitorUp, MonitorOff, PhoneOff,
   Plus, Users, MessageCircle, Paperclip, Lock, Globe, Send, UserPlus,
-  Ban, X, Copy, Download, RefreshCw, Sparkles, Settings2,
+  Ban, X, Copy, Download, RefreshCw, Sparkles, Settings2, Circle, Square, Trash2, Film,
 } from "lucide-react";
 import {
   listRooms, createRoom, joinRoom, inviteRoom, removeParticipant, updateParticipantRole,
   leaveRoom, shareFile, roomWebSocketUrl, downloadSharedFile, summarizeRoom, closeRoom, updateRoom,
+  startRecording, stopRecording, consentRecording, listRecordings, downloadRecording, deleteRecording,
 } from "../api/roomLiveApi";
+import useRoomRecorder from "../hooks/useRoomRecorder";
 import "./room-live.css";
 
 const turnUrl = import.meta.env.VITE_ROOM_LIVE_TURN_URL;
@@ -55,6 +57,31 @@ export default function RoomLive() {
   const remoteVideoRefs = useRef({});
   const currentRoom = useRef(null);
   const userId = useRef("");
+  const [recording, setRecording] = useState(null);       // enregistrement en cours dans la salle (état public)
+  const [consentPrompt, setConsentPrompt] = useState(false);
+  const [recordings, setRecordings] = useState([]);
+  const [recBusy, setRecBusy] = useState(false);
+  const recordingRef = useRef(null);
+  const remoteStreamsRef = useRef({});
+  const participantsRef = useRef([]);
+  recordingRef.current = recording;
+  remoteStreamsRef.current = remoteStreams;
+  participantsRef.current = participants;
+
+  const getRecordingSources = useCallback(() => {
+    const list = [];
+    const image = screenStream.current || localStream.current;
+    if (image) list.push({ id: userId.current, label: "Vous", stream: image, audioStream: localStream.current, local: true });
+    Object.entries(remoteStreamsRef.current).forEach(([id, stream]) => list.push({
+      id, stream, local: false,
+      label: participantsRef.current.find((p) => String(p.user_id) === id)?.email || "Participant",
+    }));
+    return list;
+  }, []);
+  const getRecordingConsents = useCallback(() => recordingRef.current?.consents || {}, []);
+  const { start: startRec, stop: stopRec, cancel: cancelRec, isActive: recActive } = useRoomRecorder({
+    getSources: getRecordingSources, getConsents: getRecordingConsents, onError: setError,
+  });
 
   const refreshRooms = useCallback(async () => {
     try { const data = await listRooms(); setRooms(data.rooms || []); }
@@ -132,6 +159,7 @@ export default function RoomLive() {
         if (data.type === "room_updated" && data.room) setRoom(data.room);
         if (data.type === "room_closed") {
           setError("Cette salle a été fermée par son hôte.");
+          cancelRec(); setRecording(null); setConsentPrompt(false);
           socket.close(); closePeers();
           localStream.current?.getTracks().forEach((track) => track.stop());
           screenStream.current?.getTracks().forEach((track) => track.stop());
@@ -149,11 +177,25 @@ export default function RoomLive() {
             }));
           }
         }
+        if (data.type === "recording_started" && data.recording) {
+          setRecording(data.recording);
+          const me = userId.current;
+          if (String(data.recording.started_by_id) !== me && !data.recording.consents?.[me]) setConsentPrompt(true);
+        }
+        if (data.type === "recording_consent") {
+          setRecording((old) => (old && old.id === data.recording_id
+            ? { ...old, consents: { ...old.consents, [data.user_id]: data.decision } } : old));
+        }
+        if (data.type === "recording_stopped") {
+          setRecording(null); setConsentPrompt(false);
+          if (recActive()) cancelRec();
+        }
         if (data.type === "chat") setChat((old) => [...old, data.message]);
         if (data.type === "file_shared") setFiles((old) => [...old, data.file]);
         if (data.type === "participant_removed" || data.type === "participant_blocked") {
           if (String(data.user_id) === String(userId.current)) {
             setError("Votre accès à cette salle a été retiré.");
+            cancelRec(); setRecording(null); setConsentPrompt(false);
             socket.close();
             setRoom(null);
             closePeers();
@@ -203,7 +245,7 @@ export default function RoomLive() {
       socket.onerror = () => setError("Connexion temps réel impossible. Vérifiez le serveur et le jeton de session.");
     } catch (e) { setError(e.message); setRoom(null); }
     finally { setBusy(false); }
-  }, [closePeers, makePeer, sendSignal, startMedia]);
+  }, [cancelRec, closePeers, makePeer, recActive, sendSignal, startMedia]);
 
   useEffect(() => {
     const requestedRoom = new URLSearchParams(window.location.search).get("room");
@@ -236,6 +278,8 @@ export default function RoomLive() {
 
   const exitRoom = useCallback(async () => {
     const id = currentRoom.current?.id;
+    if (recActive()) { try { await stopRec(); } catch { cancelRec(); } }
+    setRecording(null); setConsentPrompt(false);
     ws.current?.close();
     ws.current = null;
     closePeers();
@@ -248,7 +292,7 @@ export default function RoomLive() {
     currentRoom.current = null;
     setSharing(false);
     refreshRooms();
-  }, [closePeers, refreshRooms]);
+  }, [cancelRec, closePeers, recActive, refreshRooms, stopRec]);
 
   useEffect(() => () => {
     ws.current?.close();
@@ -395,6 +439,51 @@ export default function RoomLive() {
       setRoom(result.room); await refreshRooms(); setRoomSettingsOpen(false);
     } catch (e) { setError(e.message); }
   }
+  async function handleStartRecording() {
+    if (!window.confirm("Démarrer l'enregistrement audio et vidéo de cette salle ?\n\nTous les participants seront informés par un indicateur visible et devront accepter ou refuser. Les participants qui refusent ne sont ni filmés ni enregistrés. Conservation : 30 jours par défaut.")) return;
+    setRecBusy(true);
+    let created = null;
+    try {
+      created = (await startRecording(room.id, { mime: "video/webm" })).recording;
+      setRecording(created);
+      await startRec(created.id);
+    } catch (e) {
+      setError(e.message);
+      if (created) { try { await stopRecording(created.id); } catch {} }
+    } finally { setRecBusy(false); }
+  }
+  async function handleStopRecording() {
+    setRecBusy(true);
+    try {
+      if (recActive()) await stopRec();
+      else if (recording) await stopRecording(recording.id);   // l'hôte arrête l'enregistrement d'un co-hôte
+      if (activeTab === "records") loadRecordings();
+    } catch (e) { setError(e.message); cancelRec(); }
+    finally { setRecBusy(false); }
+  }
+  async function handleConsent(decision) {
+    if (!recording) return;
+    try {
+      await consentRecording(recording.id, decision);
+      setRecording((old) => (old ? { ...old, consents: { ...old.consents, [userId.current]: decision } } : old));
+      setConsentPrompt(false);
+    } catch (e) { setError(e.message); }
+  }
+  const loadRecordings = useCallback(async () => {
+    if (!currentRoom.current) return;
+    try { setRecordings((await listRecordings(currentRoom.current.id)).recordings || []); }
+    catch (e) { setError(e.message); }
+  }, []);
+  async function handleDownloadRecording(item) {
+    try { await downloadRecording(item.id, `${item.room_name || "room-live"}.webm`); }
+    catch (e) { setError(e.message); }
+  }
+  async function handleDeleteRecording(item) {
+    if (!window.confirm("Supprimer définitivement cet enregistrement ?")) return;
+    try { await deleteRecording(item.id); loadRecordings(); } catch (e) { setError(e.message); }
+  }
+  useEffect(() => { if (room && activeTab === "records") loadRecordings(); }, [room, activeTab, loadRecordings]);
+
   async function handleCloseRoom() {
     if (!window.confirm("Fermer définitivement cette salle pour tous les participants ?")) return;
     try { await closeRoom(room.id); await exitRoom(); }
@@ -440,6 +529,10 @@ export default function RoomLive() {
                 {isHost && <button className="rl-secondary" onClick={editRoom} title="Modifier la salle"><Settings2 size={15}/> Paramètres</button>}
                 {isHost && <button className="rl-danger-outline" onClick={handleCloseRoom}>Fermer la salle</button>}
               </div></div>
+            {recording && <div className="rl-rec-banner" role="status" aria-live="polite">
+              <span className="rl-rec-dot"/> <strong>ENREGISTREMENT EN COURS</strong>
+              <span>lancé par {recording.started_by}{recording.consents?.[userId.current] === "refuse" ? " · vous avez refusé : vous n'êtes pas enregistré(e)" : recording.consents?.[userId.current] === "accepte" ? " · vous avez accepté" : ""}</span>
+            </div>}
             {participants.length > 5 && <div className="rl-warning">Cette salle utilise actuellement une connexion vidéo pair-à-pair. Au-delà de 5 participants, la charge réseau peut augmenter. Une architecture SFU sera nécessaire pour une montée en charge importante.</div>}
             <div className="rl-video-grid">
               <div className="rl-video-tile rl-local-tile"><video ref={localVideo} autoPlay muted playsInline/><span>{t("rl_you")} {sharing ? "· Partage d'écran" : ""}</span></div>
@@ -453,6 +546,8 @@ export default function RoomLive() {
               {myRole !== "observer" && visibleBubbles.includes("micro") && <button className={!audioOn ? "is-off" : ""} onClick={toggleAudio} title="Microphone">{audioOn ? <Mic/> : <MicOff/>}</button>}
               {myRole !== "observer" && visibleBubbles.includes("camera") && <button className={!videoOn ? "is-off" : ""} onClick={toggleVideo} title="Caméra">{videoOn ? <Video/> : <VideoOff/>}</button>}
               {myRole !== "observer" && visibleBubbles.includes("screen") && <button className={sharing ? "is-active" : ""} onClick={toggleScreen} title="Partager l'écran">{sharing ? <MonitorOff/> : <MonitorUp/>}</button>}
+              {canManage && !recording && <button className="rl-rec-btn" disabled={recBusy} onClick={handleStartRecording} title="Démarrer l'enregistrement"><Circle/></button>}
+              {canManage && recording && (String(recording.started_by_id) === userId.current || isHost) && <button className="rl-rec-btn is-recording" disabled={recBusy} onClick={handleStopRecording} title="Arrêter l'enregistrement"><Square/></button>}
               {visibleBubbles.includes("people") && <button onClick={() => setActiveTab("people")} title="Participants"><Users/></button>}
               {visibleBubbles.includes("chat") && <button onClick={() => setActiveTab("chat")} title="Messagerie"><MessageCircle/></button>}
               {visibleBubbles.includes("files") && <button onClick={() => setActiveTab("files")} title="Fichiers"><Paperclip/></button>}
@@ -470,6 +565,7 @@ export default function RoomLive() {
               <button className={activeTab === "people" ? "active" : ""} onClick={() => setActiveTab("people")}><Users size={16}/> {t("rl_people")} ({participants.length})</button>
               <button className={activeTab === "files" ? "active" : ""} onClick={() => setActiveTab("files")}><Paperclip size={16}/> {t("rl_files")}</button>
               <button className={activeTab === "summary" ? "active" : ""} onClick={() => setActiveTab("summary")}><Sparkles size={16}/> Résumé</button>
+              {canManage && <button className={activeTab === "records" ? "active" : ""} onClick={() => setActiveTab("records")}><Film size={16}/> Enreg.</button>}
             </div>
             {activeTab === "chat" && <><div className="rl-chat-list">{chat.map((m) => <div className="rl-message" key={m.id}><strong>{m.sender || "Utilisateur"}</strong><p>{m.content}</p><time>{m.created_at ? new Date(m.created_at).toLocaleTimeString() : ""}</time></div>)}</div>
               {myRole === "observer" ? <p className="rl-readonly-note">Mode observateur : la messagerie est en lecture seule.</p> : <form className="rl-chat-form" onSubmit={sendChat}><input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={t("rl_write")} maxLength={4000}/><button aria-label="Envoyer"><Send size={17}/></button></form>}</>}
@@ -492,11 +588,34 @@ export default function RoomLive() {
                 <button type="button" className="rl-secondary" onClick={() => navigator.clipboard?.writeText(summary.summary)}><Copy size={15}/> Copier</button>
               </>}
             </div>}
+            {activeTab === "records" && canManage && <div className="rl-records">
+              {recordings.length === 0 && <p className="rl-readonly-note">Aucun enregistrement pour cette salle.</p>}
+              {recordings.map((item) => <div className="rl-record" key={item.id}>
+                <div><strong>{new Date(item.started_at).toLocaleString()}</strong>
+                  <small>{item.status === "en_cours" ? "En cours" : item.status === "interrompu" ? "Interrompu (partiel)" : "Terminé"} · {(item.size / 1048576).toFixed(1)} Mo · lancé par {item.started_by}</small>
+                  <small>Conservé jusqu'au {new Date(item.retention_until).toLocaleDateString()}</small></div>
+                <div className="rl-person-actions">
+                  <button title="Télécharger" disabled={item.status === "en_cours"} onClick={() => handleDownloadRecording(item)}><Download size={16}/></button>
+                  <button title="Supprimer" disabled={item.status === "en_cours"} onClick={() => handleDeleteRecording(item)}><Trash2 size={16}/></button>
+                </div></div>)}
+            </div>}
             {activeTab === "files" && <div className="rl-files">{myRole !== "observer" && <label className="rl-upload"><Paperclip size={17}/> {t("rl_share_file")}<input type="file" onChange={handleFile}/></label>}{myRole === "observer" && <p className="rl-readonly-note">Mode observateur : partage désactivé.</p>}
               {files.map((f, i) => <div className="rl-file" key={`${f.id}-${i}`}><Paperclip size={16}/><span>{f.name}</span><button type="button" onClick={() => handleDownload(f)} title={t("rl_download")}><Download size={16}/></button></div>)}</div>}
           </aside>
         </div>
       )}
+      {room && recording && consentPrompt && <div className="rl-consent-overlay" role="dialog" aria-modal="true" aria-labelledby="rl-consent-title">
+        <div className="rl-consent">
+          <h3 id="rl-consent-title"><span className="rl-rec-dot"/> Cette réunion est enregistrée</h3>
+          <p>{recording.started_by} a démarré un enregistrement audio et vidéo. Si vous acceptez, votre image et votre voix seront incluses ; l'enregistrement est stocké de façon sécurisée, accessible uniquement à l'hôte, au co-hôte et à l'administrateur, et supprimé après la durée de conservation.</p>
+          <p>Si vous refusez, vous restez dans la réunion mais vous n'êtes ni filmé(e) ni enregistré(e).</p>
+          <div className="rl-consent-actions">
+            <button className="rl-primary" onClick={() => handleConsent("accepte")}>J'accepte</button>
+            <button className="rl-secondary" onClick={() => handleConsent("refuse")}>Je refuse (non enregistré)</button>
+            <button className="rl-danger-outline" onClick={exitRoom}>Quitter la salle</button>
+          </div>
+        </div>
+      </div>}
       <p className="rl-note">{t("rl_temp_note")}</p>
     </main>
   );

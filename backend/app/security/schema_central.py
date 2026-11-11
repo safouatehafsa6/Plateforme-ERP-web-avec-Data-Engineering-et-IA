@@ -2,7 +2,7 @@
 
 Les scripts de backend/database/central ne sont rejoués par l'image postgres qu'au tout premier
 démarrage (volume vide). Les migrations 011 et 012 sont appliquées par appareils.py et
-tentatives.py ; ce module applique les autres (010, 013, 014, 015), sinon :
+tentatives.py ; ce module applique les autres (010, 013, 014, 015, 016), sinon :
   - 014 absent => la fonction consommer_connexion_essai() n'existe pas et TOUTES les connexions
     interne/externe échouent (controler_essai) ;
   - 013 absent => pas d'historique des changements de statut d'entreprise.
@@ -29,6 +29,9 @@ _MIGRATIONS = (
     ("015_boutons_flottants.sql",
      "SELECT to_regclass('bouton_flottant') IS NOT NULL AND to_regclass('bouton_flottant_config') IS NOT NULL "
      "AND to_regclass('bouton_flottant_historique') IS NOT NULL"),
+    ("016_room_live.sql",
+     "SELECT to_regclass('room_live_salle') IS NOT NULL AND to_regclass('room_live_enregistrement') IS NOT NULL "
+     "AND to_regclass('room_live_enregistrement_journal') IS NOT NULL"),
 )
 
 

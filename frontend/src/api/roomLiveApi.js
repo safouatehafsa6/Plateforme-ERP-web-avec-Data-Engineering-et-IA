@@ -65,3 +65,36 @@ export async function downloadSharedFile(fileId, filename) {
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+// ---- Enregistrements ----
+export const startRecording = (roomId, payload = {}) => request(`/rooms/${roomId}/recordings/start`, {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+});
+export const consentRecording = (recId, decision) => request(`/recordings/${recId}/consent`, {
+  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }),
+});
+export const stopRecording = (recId) => request(`/recordings/${recId}/stop`, { method: "POST" });
+export const uploadRecordingChunk = (recId, seq, blob) => request(`/recordings/${recId}/chunk?seq=${seq}`, {
+  method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: blob,
+});
+export const listRecordings = (roomId) => request(`/recordings${roomId ? `?room_id=${encodeURIComponent(roomId)}` : ""}`);
+export const deleteRecording = (recId) => request(`/recordings/${recId}`, { method: "DELETE" });
+
+export async function downloadRecording(recId, filename) {
+  const response = await fetch(`${API_BASE_URL}/room-live/recordings/${encodeURIComponent(recId)}/download`, {
+    headers: headers(),
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.detail || `Erreur ${response.status}`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename || "enregistrement.webm";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}

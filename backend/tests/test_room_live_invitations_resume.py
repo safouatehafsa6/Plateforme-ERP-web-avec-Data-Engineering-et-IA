@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ["LLM_PROVIDER"] = "none"
+os.environ["ROOM_LIVE_PERSIST"] = "0"  # pas de base de données dans ces tests
 
 if "app.db" not in sys.modules:
     faux_db = types.ModuleType("app.db")

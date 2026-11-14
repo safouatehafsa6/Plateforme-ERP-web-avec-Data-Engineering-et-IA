@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from app.db import get_pool_entreprise
 from app.security.permissions import exiger_permission
 from app.routers.notifications import notifier_action
+from app.services.moteur_regles_metier import assurer_schema, calculer_document
 
 router = APIRouter(prefix="/api/achats", tags=["achats"])
 
@@ -15,6 +16,7 @@ class LigneAchat(BaseModel):
     produitId: int
     quantite: int = Field(gt=0)
     prixUnitaire: Decimal = Field(ge=0)
+    remisePct: Decimal = Field(default=Decimal("0"), ge=0, le=100)
 
 
 class LigneDemande(BaseModel):
@@ -49,7 +51,9 @@ class ReceptionPayload(BaseModel):
     notes: str | None = None
 
 def _pool(utilisateur):
-    return get_pool_entreprise(utilisateur["nomBase"])
+    pool = get_pool_entreprise(utilisateur["nomBase"])
+    assurer_schema(pool, utilisateur["nomBase"])
+    return pool
 
 
 def _dicts(cur):
@@ -61,7 +65,8 @@ def _total(lignes):
     total = Decimal("0")
     for l in lignes:
         prix = getattr(l, "prixUnitaire", getattr(l, "prixEstime", Decimal("0")))
-        total += prix * l.quantite
+        remise = getattr(l, "remisePct", Decimal("0"))
+        total += prix * l.quantite * (Decimal("1") - remise / Decimal("100"))
     return total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
@@ -224,9 +229,18 @@ def creer_bon_commande(payload: BonCommandePayload, utilisateur=Depends(exiger_p
             )
             aid = cur.fetchone()[0]
             cur.executemany(
-                "INSERT INTO ligne_achat (achat_id, produit_id, quantite, prix_unitaire) VALUES (%s,%s,%s,%s)",
-                [(aid, l.produitId, l.quantite, l.prixUnitaire) for l in payload.lignes],
+                "INSERT INTO ligne_achat (achat_id, produit_id, quantite, prix_unitaire, remise_pct) VALUES (%s,%s,%s,%s,%s)",
+                [(aid, l.produitId, l.quantite, l.prixUnitaire, l.remisePct) for l in payload.lignes],
             )
+            cur.execute("""SELECT la.produit_id, p.nom AS designation, la.quantite, la.prix_unitaire,
+                                  la.remise_pct, p.taux_tva
+                           FROM ligne_achat la JOIN produit p ON p.id=la.produit_id
+                           WHERE la.achat_id=%s ORDER BY la.id""", (aid,))
+            lignes_calcul = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
+            resultat = calculer_document(cur, module='achats', type_document='bon_commande',
+                document_id=aid, lignes=lignes_calcul, auteur=str(utilisateur.get('id') or ''), reference=numero)
+            cur.execute("UPDATE achat SET montant_total=%s, montant_ht=%s, montant_tva=%s WHERE id=%s",
+                (resultat['montant_ttc'], resultat['montant_ht'], resultat['montant_tva'], aid))
             if payload.demandeId:
                 cur.execute("UPDATE demande_achat SET statut='convertie', date_modification=NOW() WHERE id=%s", (payload.demandeId,))
         conn.commit()
@@ -279,6 +293,15 @@ def convertir_demande(demande_id: int, fournisseur_id: int, utilisateur=Depends(
             cur.execute("INSERT INTO achat (fournisseur_id, statut, montant_total, numero, demande_id, notes) VALUES (%s,'commande',%s,%s,%s,%s) RETURNING id", (fournisseur_id, montant, numero, demande_id, notes))
             aid = cur.fetchone()[0]
             cur.executemany("INSERT INTO ligne_achat (achat_id, produit_id, quantite, prix_unitaire) VALUES (%s,%s,%s,%s)", [(aid, p, q, pr) for p,q,pr in lignes])
+            cur.execute("""SELECT la.produit_id, p.nom AS designation, la.quantite, la.prix_unitaire,
+                                  la.remise_pct, p.taux_tva
+                           FROM ligne_achat la JOIN produit p ON p.id=la.produit_id
+                           WHERE la.achat_id=%s ORDER BY la.id""", (aid,))
+            lignes_calcul = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
+            resultat = calculer_document(cur, module='achats', type_document='bon_commande',
+                document_id=aid, lignes=lignes_calcul, auteur=str(utilisateur.get('id') or ''), reference=numero)
+            cur.execute("UPDATE achat SET montant_total=%s, montant_ht=%s, montant_tva=%s WHERE id=%s",
+                (resultat['montant_ttc'], resultat['montant_ht'], resultat['montant_tva'], aid))
             cur.execute("UPDATE demande_achat SET statut='convertie', date_modification=NOW() WHERE id=%s", (demande_id,))
         conn.commit()
     except Exception:

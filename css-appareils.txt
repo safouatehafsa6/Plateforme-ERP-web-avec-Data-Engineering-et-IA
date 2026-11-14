@@ -1,0 +1,8 @@
+﻿
+Path                                                                                                LineNumber
+----                                                                                                ----------
+C:\Users\hp\Desktop\Plateforme-ERP-web-avec-Data-Engineering-et-IA\frontend\src\pages\Appareils.jsx         88
+C:\Users\hp\Desktop\Plateforme-ERP-web-avec-Data-Engineering-et-IA\frontend\src\styles\global.css         1475
+C:\Users\hp\Desktop\Plateforme-ERP-web-avec-Data-Engineering-et-IA\frontend\src\styles\global.css         1476
+
+

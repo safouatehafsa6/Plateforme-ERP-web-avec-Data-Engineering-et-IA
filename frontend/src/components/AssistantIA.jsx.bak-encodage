@@ -1,0 +1,372 @@
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  X, Trash2, Send, Sparkles, Paperclip,
+  Mic, MicOff, Volume2, VolumeX, BellRing,
+} from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { API_BASE_URL } from "../api/config";
+import DocumentsRag from "./DocumentsRag";
+import ChampSuggestions from "./ChampSuggestions";
+
+const LANGUES = [
+  { code: "fr", label: "FR", speech: "fr-FR" },
+  { code: "en", label: "EN", speech: "en-US" },
+  { code: "ar", label: "Ø¹", speech: "ar-MA" },
+];
+
+const MODULES = {
+  dashboard: "dashboard", ventes: "ventes", achats: "achats",
+  fournisseurs: "fournisseurs", clients: "clients", stock: "stock",
+  facturation: "facturation", comptabilite: "comptabilite",
+  parametres: "parametres", collaborateurs: "collaborateurs",
+  "roles-permissions": "roles-permissions",
+  "utilisateurs-externes": "utilisateurs-externes",
+};
+
+function getModule(pathname) {
+  const key = pathname.replace(/^\//, "").split("/")[0] || "dashboard";
+  return MODULES[key] || "dashboard";
+}
+
+const TEXTES = {
+  fr: {
+    title: "Assistant IA", placeholder: "Ã‰crivez votre questionâ€¦", clear: "Effacer",
+    close: "Fermer", send: "Envoyer", welcome: "Bonjour ! Je peux vous guider dans lâ€™ERP et adapter mon aide au module actuel.",
+    context: "Contexte", suggestions: ["CrÃ©er une commande", "SynthÃ¨se des ventes", "Produits les plus vendus", "Top clients"],
+    micStart: "DÃ©marrer la saisie vocale", micStop: "ArrÃªter la saisie vocale",
+    voiceOn: "Activer les rÃ©ponses vocales", voiceOff: "DÃ©sactiver les rÃ©ponses vocales",
+    readNotifications: "Lire mes notifications non lues", listening: "Je vous Ã©couteâ€¦",
+    micUnsupported: "La reconnaissance vocale nâ€™est pas prise en charge par ce navigateur.",
+    micDenied: "AccÃ¨s au microphone refusÃ©. Autorisez-le dans les paramÃ¨tres du navigateur.",
+    micError: "La saisie vocale a Ã©chouÃ©. RÃ©essayez.", notificationsNone: "Vous nâ€™avez aucune notification non lue.",
+    notificationsError: "Impossible de rÃ©cupÃ©rer les notifications.", speechUnsupported: "La lecture vocale nâ€™est pas prise en charge par ce navigateur.", moduleOpened: "Ouverture du module", documentsOpened: "Espace documentaire ouvert.",
+  },
+  en: {
+    title: "AI Assistant", placeholder: "Write your questionâ€¦", clear: "Clear",
+    close: "Close", send: "Send", welcome: "Hello! I can guide you through the ERP and adapt my help to the current module.",
+    context: "Context", suggestions: ["Create an order", "Sales summary", "Top products", "Top customers"],
+    micStart: "Start voice input", micStop: "Stop voice input",
+    voiceOn: "Enable spoken replies", voiceOff: "Disable spoken replies",
+    readNotifications: "Read my unread notifications", listening: "Listeningâ€¦",
+    micUnsupported: "Speech recognition is not supported by this browser.",
+    micDenied: "Microphone access denied. Allow it in your browser settings.",
+    micError: "Voice input failed. Please try again.", notificationsNone: "You have no unread notifications.",
+    notificationsError: "Could not retrieve notifications.", speechUnsupported: "Spoken playback is not supported by this browser.", moduleOpened: "Opening module", documentsOpened: "Document area opened.",
+  },
+  ar: {
+    title: "Ù…Ø³Ø§Ø¹Ø¯ Ø§Ù„Ø°ÙƒØ§Ø¡ Ø§Ù„Ø§ØµØ·Ù†Ø§Ø¹ÙŠ", placeholder: "Ø§ÙƒØªØ¨ Ø³Ø¤Ø§Ù„Ùƒâ€¦", clear: "Ù…Ø³Ø­",
+    close: "Ø¥ØºÙ„Ø§Ù‚", send: "Ø¥Ø±Ø³Ø§Ù„", welcome: "Ù…Ø±Ø­Ø¨Ø§Ù‹! ÙŠÙ…ÙƒÙ†Ù†ÙŠ Ø¥Ø±Ø´Ø§Ø¯Ùƒ Ø¯Ø§Ø®Ù„ Ù…Ù†ØµØ© ERP ÙˆØªÙƒÙŠÙŠÙ Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯Ø© Ø­Ø³Ø¨ Ø§Ù„ÙˆØ­Ø¯Ø© Ø§Ù„Ø­Ø§Ù„ÙŠØ©.",
+    context: "Ø§Ù„Ø³ÙŠØ§Ù‚", suggestions: ["Ø¥Ù†Ø´Ø§Ø¡ Ø·Ù„Ø¨", "Ù…Ù„Ø®Øµ Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª", "Ø£ÙƒØ«Ø± Ø§Ù„Ù…Ù†ØªØ¬Ø§Øª Ù…Ø¨ÙŠØ¹Ø§Ù‹", "Ø£ÙØ¶Ù„ Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡"],
+    micStart: "Ø¨Ø¯Ø¡ Ø§Ù„Ø¥Ø¯Ø®Ø§Ù„ Ø§Ù„ØµÙˆØªÙŠ", micStop: "Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„Ø¥Ø¯Ø®Ø§Ù„ Ø§Ù„ØµÙˆØªÙŠ",
+    voiceOn: "ØªÙØ¹ÙŠÙ„ Ø§Ù„Ø±Ø¯ÙˆØ¯ Ø§Ù„ØµÙˆØªÙŠØ©", voiceOff: "Ø¥ÙŠÙ‚Ø§Ù Ø§Ù„Ø±Ø¯ÙˆØ¯ Ø§Ù„ØµÙˆØªÙŠØ©",
+    readNotifications: "Ù‚Ø±Ø§Ø¡Ø© Ø¥Ø´Ø¹Ø§Ø±Ø§ØªÙŠ ØºÙŠØ± Ø§Ù„Ù…Ù‚Ø±ÙˆØ¡Ø©", listening: "Ø£Ù†Ø§ Ø£Ø³ØªÙ…Ø¹ Ø¥Ù„ÙŠÙƒâ€¦",
+    micUnsupported: "Ø§Ù„ØªØ¹Ø±Ù Ø¹Ù„Ù‰ Ø§Ù„ÙƒÙ„Ø§Ù… ØºÙŠØ± Ù…Ø¯Ø¹ÙˆÙ… ÙÙŠ Ù‡Ø°Ø§ Ø§Ù„Ù…ØªØµÙØ­.",
+    micDenied: "ØªÙ… Ø±ÙØ¶ Ø§Ù„ÙˆØµÙˆÙ„ Ø¥Ù„Ù‰ Ø§Ù„Ù…ÙŠÙƒØ±ÙˆÙÙˆÙ†. ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø³Ù…Ø§Ø­ Ø¨Ù‡ Ù…Ù† Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª Ø§Ù„Ù…ØªØµÙØ­.",
+    micError: "ØªØ¹Ø°Ø± Ø§Ù„Ø¥Ø¯Ø®Ø§Ù„ Ø§Ù„ØµÙˆØªÙŠ. Ø­Ø§ÙˆÙ„ Ù…Ø±Ø© Ø£Ø®Ø±Ù‰.", notificationsNone: "Ù„ÙŠØ³ Ù„Ø¯ÙŠÙƒ Ø¥Ø´Ø¹Ø§Ø±Ø§Øª ØºÙŠØ± Ù…Ù‚Ø±ÙˆØ¡Ø©.",
+    notificationsError: "ØªØ¹Ø°Ø± Ø¬Ù„Ø¨ Ø§Ù„Ø¥Ø´Ø¹Ø§Ø±Ø§Øª.", speechUnsupported: "ØªØ´ØºÙŠÙ„ Ø§Ù„ØµÙˆØª ØºÙŠØ± Ù…Ø¯Ø¹ÙˆÙ… ÙÙŠ Ù‡Ø°Ø§ Ø§Ù„Ù…ØªØµÙØ­.", moduleOpened: "Ø¬Ø§Ø±Ù ÙØªØ­ Ø§Ù„ÙˆØ­Ø¯Ø©", documentsOpened: "ØªÙ… ÙØªØ­ Ù…Ø³Ø§Ø­Ø© Ø§Ù„Ù…Ø³ØªÙ†Ø¯Ø§Øª.",
+  },
+};
+
+function getSpeechRecognition() {
+  if (typeof window === "undefined") return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+export default function AssistantIA({ open, onClose }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [langue, setLangue] = useState(() => localStorage.getItem("erp_assistant_lang") || "fr");
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [state, setState] = useState({ operation: null, step: null, data: {} });
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("");
+  const recognitionRef = useRef(null);
+
+  const module = useMemo(() => getModule(location.pathname), [location.pathname]);
+  const ui = TEXTES[langue] || TEXTES.fr;
+  const rtl = langue === "ar";
+  const speechSupported = typeof window !== "undefined"
+    && Boolean(window.speechSynthesis)
+    && typeof window.SpeechSynthesisUtterance === "function";
+
+  const parler = useCallback((texte) => {
+    if (!speechSupported || !texte) return;
+    window.speechSynthesis.cancel();
+    const utterance = new window.SpeechSynthesisUtterance(String(texte));
+    utterance.lang = LANGUES.find((l) => l.code === langue)?.speech || "fr-FR";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  }, [langue, speechSupported]);
+
+  useEffect(() => { localStorage.setItem("erp_assistant_lang", langue); }, [langue]);
+
+  useEffect(() => {
+    if (open && messages.length === 0) setMessages([{ role: "assistant", text: ui.welcome }]);
+  }, [open, langue]);
+
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setVoiceListening(false);
+    setVoiceStatus("");
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  }, [langue]);
+
+  useEffect(() => () => {
+    if (recognitionRef.current) recognitionRef.current.stop();
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  }, []);
+
+  const envoyerTexte = useCallback(async (texte) => {
+    const question = String(texte || "").trim();
+    if (!question || sending) return;
+    setMessages((m) => [...m, { role: "user", text: question }]);
+    setInput("");
+    setSending(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({ message: question, langue, module, state }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "assistant_error");
+      if (data.state) setState(data.state);
+      const reply = data.reply || "";
+      setMessages((m) => [...m, {
+        role: "assistant", text: reply,
+        sources: Array.isArray(data.sources) ? data.sources : [],
+      }]);
+      if (voiceEnabled && reply) parler(reply);
+    } catch {
+      const fallback = langue === "ar"
+        ? "ØªØ¹Ø°Ø± Ø§Ù„Ø§ØªØµØ§Ù„ Ø¨Ø§Ù„Ù…Ø³Ø§Ø¹Ø¯ Ø­Ø§Ù„ÙŠØ§Ù‹."
+        : langue === "en"
+          ? "The assistant could not be reached right now."
+          : "Impossible de contacter lâ€™assistant pour le moment.";
+      setMessages((m) => [...m, { role: "assistant", text: fallback }]);
+      if (voiceEnabled) parler(fallback);
+    } finally {
+      setSending(false);
+    }
+  }, [langue, module, state, sending, voiceEnabled, parler]);
+
+  async function envoyer(e) {
+    e?.preventDefault();
+    await envoyerTexte(input);
+  }
+
+  function traiterCommandeVocale(texte) {
+    const normalise = String(texte || "").toLocaleLowerCase(langue)
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const commandes = [
+      { path: "/dashboard", mots: ["ouvrir tableau de bord", "ouvrir dashboard", "open dashboard", "Ø§ÙØªØ­ Ù„ÙˆØ­Ø© Ø§Ù„ØªØ­ÙƒÙ…"] },
+      { path: "/ventes", mots: ["ouvrir ventes", "ouvre ventes", "ouvrir le module ventes", "ouvre le module ventes", "open sales", "open sales module", "Ø§ÙØªØ­ Ø§Ù„Ù…Ø¨ÙŠØ¹Ø§Øª"] },
+      { path: "/achats", mots: ["ouvrir achats", "ouvre achats", "ouvrir le module achats", "open purchases", "Ø§ÙØªØ­ Ø§Ù„Ù…Ø´ØªØ±ÙŠØ§Øª"] },
+      { path: "/clients", mots: ["ouvrir clients", "ouvre clients", "ouvrir le module clients", "open customers", "Ø§ÙØªØ­ Ø§Ù„Ø¹Ù…Ù„Ø§Ø¡"] },
+      { path: "/fournisseurs", mots: ["ouvrir fournisseurs", "ouvre fournisseurs", "ouvrir le module fournisseurs", "open suppliers", "Ø§ÙØªØ­ Ø§Ù„Ù…ÙˆØ±Ø¯ÙŠÙ†"] },
+      { path: "/stock", mots: ["ouvrir stock", "ouvre stock", "ouvrir le module stock", "open inventory", "Ø§ÙØªØ­ Ø§Ù„Ù…Ø®Ø²ÙˆÙ†"] },
+      { path: "/facturation", mots: ["ouvrir facturation", "ouvre facturation", "ouvrir le module facturation", "open invoicing", "Ø§ÙØªØ­ Ø§Ù„ÙÙˆØªØ±Ø©"] },
+      { path: "/comptabilite", mots: ["ouvrir comptabilite", "ouvrir comptabilite", "open accounting", "Ø§ÙØªØ­ Ø§Ù„Ù…Ø­Ø§Ø³Ø¨Ø©"] },
+      { path: "/calculs", mots: ["ouvrir calculs", "open calculations"] },
+      { path: "/room-live", mots: ["ouvrir room live", "open room live"] },
+    ];
+    const moduleCommande = commandes.find((item) => item.mots.some((mot) => normalise === mot || normalise === `va dans ${mot}`));
+    if (moduleCommande) {
+      navigate(moduleCommande.path);
+      const reponse = `${ui.moduleOpened} ${moduleCommande.path.replace("/", "")}.`;
+      setMessages((m) => [...m, { role: "assistant", text: reponse }]);
+      if (voiceEnabled) parler(reponse);
+      return true;
+    }
+    if (["ouvrir documents", "ouvrir les documents", "chercher dans les documents", "rechercher un document", "open documents", "search documents", "Ø§ÙØªØ­ Ø§Ù„Ù…Ø³ØªÙ†Ø¯Ø§Øª", "Ø§Ø¨Ø­Ø« ÙÙŠ Ø§Ù„Ù…Ø³ØªÙ†Ø¯Ø§Øª"].includes(normalise)) {
+      setDocsOpen(true);
+      setMessages((m) => [...m, { role: "assistant", text: ui.documentsOpened }]);
+      if (voiceEnabled) parler(ui.documentsOpened);
+      return true;
+    }
+    if (["lire notifications", "ouvrir notifications", "mes notifications", "afficher notifications", "read notifications", "open notifications", "show notifications", "Ø§Ù‚Ø±Ø§ Ø§Ù„Ø§Ø´Ø¹Ø§Ø±Ø§Øª", "Ø§Ø¹Ø±Ø¶ Ø§Ù„Ø§Ø´Ø¹Ø§Ø±Ø§Øª"].includes(normalise)) {
+      void lireNotifications();
+      return true;
+    }
+    return false;
+  }
+
+  function demarrerMicro() {
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) {
+      setVoiceStatus(ui.micUnsupported);
+      return;
+    }
+    if (recognitionRef.current) recognitionRef.current.stop();
+
+    const recognition = new Recognition();
+    recognition.lang = LANGUES.find((l) => l.code === langue)?.speech || "fr-FR";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      setVoiceListening(true);
+      setVoiceStatus(ui.listening);
+    };
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setVoiceStatus("");
+        if (!traiterCommandeVocale(transcript)) void envoyerTexte(transcript);
+      }
+    };
+    recognition.onerror = (event) => {
+      console.error("ERREUR RECONNAISSANCE VOCALE :", {
+        error: event.error,
+        message: event.message
+      });
+
+      setVoiceListening(false);
+      setVoiceStatus(`Erreur microphone : ${event.error}`);
+    };
+    recognition.onend = () => {
+      setVoiceListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      setVoiceListening(false);
+      setVoiceStatus(ui.micError);
+      recognitionRef.current = null;
+    }
+  }
+
+  function arreterMicro() {
+    recognitionRef.current?.stop();
+    setVoiceListening(false);
+  }
+
+  async function lireNotifications() {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setVoiceStatus(ui.notificationsError);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/notifications?limit=10&non_lues_seulement=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || ui.notificationsError);
+      const items = Array.isArray(data.notifications) ? data.notifications : [];
+      if (!items.length) {
+        setVoiceStatus(ui.notificationsNone);
+        parler(ui.notificationsNone);
+        return;
+      }
+      const texte = items.slice(0, 5).map((n, index) =>
+        `${index + 1}. ${n.titre}. ${n.message}`
+      ).join(". ");
+      setMessages((m) => [...m, { role: "assistant", text: texte }]);
+      setVoiceStatus("");
+      parler(texte);
+    } catch {
+      setVoiceStatus(ui.notificationsError);
+    }
+  }
+
+  function effacer() {
+    setMessages([]);
+    setState({ operation: null, step: null, data: {} });
+    setInput("");
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  }
+
+  if (!open) return null;
+
+  return (
+    <section className={`assistant-panel${rtl ? " assistant-panel--rtl" : ""}`} dir={rtl ? "rtl" : "ltr"} aria-label={ui.title}>
+      <header className="assistant-panel__header">
+        <div className="assistant-panel__titre">
+          <span className="assistant-panel__icone"><Sparkles size={16} /></span>
+          <div><strong>{ui.title}</strong><small>{ui.context}: {module}</small></div>
+        </div>
+        <div className="assistant-panel__actions">
+          <button type="button" onClick={() => setDocsOpen((v) => !v)} title="Documents" aria-label="Documents" aria-pressed={docsOpen}><Paperclip size={16} /></button>
+          <button type="button" onClick={effacer} title={ui.clear} aria-label={ui.clear}><Trash2 size={16} /></button>
+          <button type="button" onClick={onClose} title={ui.close} aria-label={ui.close}><X size={18} /></button>
+        </div>
+      </header>
+
+      <div className="assistant-panel__langues" aria-label="Assistant language">
+        {LANGUES.map((l) => <button key={l.code} type="button" className={langue === l.code ? "actif" : ""} onClick={() => setLangue(l.code)} aria-pressed={langue === l.code}>{l.label}</button>)}
+      </div>
+
+      <div className="assistant-panel__voice" aria-label="Voice controls">
+        <button type="button" onClick={() => {
+          if (!speechSupported) {
+            setVoiceStatus(ui.speechUnsupported);
+            return;
+          }
+          setVoiceEnabled((v) => {
+            const next = !v;
+            if (!next && window.speechSynthesis) window.speechSynthesis.cancel();
+            return next;
+          });
+          setVoiceStatus("");
+        }} aria-pressed={voiceEnabled} title={voiceEnabled ? ui.voiceOff : ui.voiceOn}>
+          {voiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          <span>{voiceEnabled ? ui.voiceOff : ui.voiceOn}</span>
+        </button>
+        <button type="button" onClick={voiceListening ? arreterMicro : demarrerMicro} disabled={sending} aria-pressed={voiceListening} title={voiceListening ? ui.micStop : ui.micStart}>
+          {voiceListening ? <MicOff size={16} /> : <Mic size={16} />}
+          <span>{voiceListening ? ui.micStop : ui.micStart}</span>
+        </button>
+        <button type="button" onClick={lireNotifications} title={ui.readNotifications}>
+          <BellRing size={16} /><span>{ui.readNotifications}</span>
+        </button>
+      </div>
+      {voiceStatus && <p className="assistant-panel__voice-status" role="status">{voiceStatus}</p>}
+
+      {docsOpen && <DocumentsRag langue={langue} />}
+      <div className="assistant-panel__messages" aria-live="polite" aria-relevant="additions">
+        {messages.map((m, i) => (
+          <div key={i} className={`assistant-message assistant-message--${m.role}`}>
+            <div>{m.text}</div>
+            {m.role === "assistant" && m.sources?.length > 0 && (
+              <div className="assistant-sources">
+                <strong>{langue === "en" ? "Sources" : langue === "ar" ? "Ø§Ù„Ù…ØµØ§Ø¯Ø±" : "Sources"}</strong>
+                {m.sources.map((source, j) => (
+                  <details key={`${source.id}-${j}`}>
+                    <summary>[{j + 1}] {source.title} Â· {source.source}</summary>
+                    <small>{source.module}</small><p>{source.excerpt}</p>
+                  </details>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {sending && <div className="assistant-message assistant-message--assistant">â€¦</div>}
+        {messages.length <= 1 && (
+          <div className="assistant-panel__suggestions">
+            {ui.suggestions.map((s) => <button key={s} type="button" onClick={() => setInput(s)}>{s}</button>)}
+          </div>
+        )}
+      </div>
+
+      <form className="assistant-panel__form" onSubmit={envoyer}>
+        <ChampSuggestions value={input} onChange={setInput} placeholder={ui.placeholder} ariaLabel={ui.placeholder} langue={langue} module={module} />
+        <button type="submit" disabled={!input.trim() || sending} title={ui.send} aria-label={ui.send}><Send size={17} /></button>
+      </form>
+    </section>
+  );
+}
+

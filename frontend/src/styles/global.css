@@ -1,4 +1,4 @@
-@import "@fontsource/fraunces/600.css";
+﻿@import "@fontsource/fraunces/600.css";
 @import "@fontsource/fraunces/500-italic.css";
 @import "@fontsource/inter/400.css";
 @import "@fontsource/inter/500.css";
@@ -79,7 +79,7 @@ a {
   color: inherit;
 }
 
-/* ---- Écran de connexion ---- */
+/* ---- ├ëcran de connexion ---- */
 
 .connexion-layout {
   min-height: 100vh;
@@ -255,7 +255,7 @@ a {
   line-height: 1.4;
 }
 
-/* Champ mot de passe avec icône œil (afficher/masquer) */
+/* Champ mot de passe avec ic├┤ne ┼ôil (afficher/masquer) */
 .champ-mot-de-passe {
   position: relative;
 }
@@ -377,8 +377,8 @@ a {
   height: 100%;
 }
 
-/* Affiché quand le code n'a pas pu être chargé : évite une case
-   totalement vide, qui ne dit rien à l'utilisateur. */
+/* Affich├® quand le code n'a pas pu ├¬tre charg├® : ├®vite une case
+   totalement vide, qui ne dit rien ├á l'utilisateur. */
 .captcha-image__vide {
   display: flex;
   align-items: center;
@@ -424,7 +424,7 @@ a {
   to { transform: rotate(360deg); }
 }
 
-/* ---- Inscription (parcours en plusieurs étapes) ---- */
+/* ---- Inscription (parcours en plusieurs ├®tapes) ---- */
 
 .inscription-layout {
   min-height: 100vh;
@@ -650,7 +650,7 @@ a {
   display: none;
 }
 
-/* Desktop (>=769px) : nav + langues + thèmes + actions visibles en ligne */
+/* Desktop (>=769px) : nav + langues + th├¿mes + actions visibles en ligne */
 @media (min-width: 769px) {
   .app-header__droite--desktop {
     display: flex !important;
@@ -662,7 +662,7 @@ a {
 }
 
 /* Mobile + Tablette (<=768px) : on cache la nav et les actions du header
-   desktop, remplacées par le hamburger + panneau déroulant */
+   desktop, remplac├®es par le hamburger + panneau d├®roulant */
 @media (max-width: 768px) {
   .app-header__nav--desktop {
     display: none;
@@ -782,11 +782,11 @@ a {
   background: var(--brass-dark);
 }
 
-/* En RTL, l'ordre visuel s'inverse automatiquement grâce à dir="rtl"
-   sur <html> : flex, justify-content et gap se réorganisent nativement,
-   sans classes supplémentaires à écrire. */
+/* En RTL, l'ordre visuel s'inverse automatiquement gr├óce ├á dir="rtl"
+   sur <html> : flex, justify-content et gap se r├®organisent nativement,
+   sans classes suppl├®mentaires ├á ├®crire. */
 
-/* Décale tout le contenu sous le Header fixe */
+/* D├®cale tout le contenu sous le Header fixe */
 .connexion-layout,
 .app-layout {
   padding-top: 64px;
@@ -955,15 +955,15 @@ a {
   }
 }
 
-/* Mobile (<=480px) : 1 colonne, plus lisible que 2 sur petit écran */
+/* Mobile (<=480px) : 1 colonne, plus lisible que 2 sur petit ├®cran */
 @media (max-width: 480px) {
   .kpi-grille {
     grid-template-columns: 1fr;
   }
 }
 
-/* Wide Desktop (>=1280px) : on limite la largeur du contenu pour éviter
-   des lignes trop étirées et illisibles */
+/* Wide Desktop (>=1280px) : on limite la largeur du contenu pour ├®viter
+   des lignes trop ├®tir├®es et illisibles */
 @media (min-width: 1280px) {
   .app-main {
     max-width: 1240px;
@@ -1013,7 +1013,7 @@ a {
   font-size: 0.9rem;
 }
 
-/* Accès direct au pipeline Data Engineering depuis le tableau de bord principal. */
+/* Acc├¿s direct au pipeline Data Engineering depuis le tableau de bord principal. */
 .dashboard-data-access {
   display: flex;
   align-items: center;
@@ -1116,7 +1116,7 @@ a {
   flex-shrink: 0;
 }
 
-/* ---- Rôles & Permissions (matrice RBAC) ---- */
+/* ---- R├┤les & Permissions (matrice RBAC) ---- */
 
 .rbac-mise-en-page {
   display: grid;
@@ -1258,7 +1258,7 @@ a {
   border-color: var(--brass);
 }
 
-/* ---- Tableaux d'administration génériques (abonnements, etc.) ---- */
+/* ---- Tableaux d'administration g├®n├®riques (abonnements, etc.) ---- */
 
 .table-admin {
   width: 100%;
@@ -1316,9 +1316,9 @@ a {
   color: var(--danger);
 }
 
-/* Panneau de formulaire inline (ex. "Nouveau collaborateur") — classe
-   utilisée par Collaborateurs.jsx et UtilisateursExternes.jsx mais
-   jusqu'ici jamais définie : le formulaire s'affichait sans aucun style. */
+/* Panneau de formulaire inline (ex. "Nouveau collaborateur") ÔÇö classe
+   utilis├®e par Collaborateurs.jsx et UtilisateursExternes.jsx mais
+   jusqu'ici jamais d├®finie : le formulaire s'affichait sans aucun style. */
 .panel {
   background: var(--carte-fond);
   border: 1px solid var(--paper-line);
@@ -1376,7 +1376,7 @@ a {
   background: var(--paper);
 }
 
-/* Portail Utilisateurs externes : en-tête minimal, sans la Sidebar ERP
+/* Portail Utilisateurs externes : en-t├¬te minimal, sans la Sidebar ERP
    (un client/partenaire ne doit voir que son propre espace). */
 .portail-layout {
   min-height: 100vh;
@@ -1435,7 +1435,7 @@ a {
   margin-bottom: 1.1rem;
 }
 
-/* ===== Module métier Ventes ===== */
+/* ===== Module m├®tier Ventes ===== */
 .ventes-entete { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
 .ventes-sous-titre { margin:-.45rem 0 0; color:var(--text-muted); font-size:.9rem; }
 .ventes-btn-auto { width:auto; display:inline-flex; align-items:center; gap:.45rem; }
@@ -1474,7 +1474,7 @@ a {
   .ventes-form__pied { align-items:flex-start; flex-direction:column; }
 }
 
-/* ===== Module métier Achats ===== */
+/* ===== Module m├®tier Achats ===== */
 .achats-entete { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
 .achats-sous-titre { margin:-.45rem 0 0; color:var(--text-muted); font-size:.9rem; }
 .achats-btn-auto { width:auto; display:inline-flex; align-items:center; gap:.45rem; }
@@ -1534,7 +1534,7 @@ a {
 .appareils-page {
   padding-top: calc(64px + 1.5rem);
 }
-/* ===== Paramètres / activation des fonctionnalités ===== */
+/* ===== Param├¿tres / activation des fonctionnalit├®s ===== */
 .parametres-page { max-width: 1100px; }
 .parametres-page .page-head h1 { display:flex; align-items:center; gap:.5rem; }
 .parametres-page .page-head p { color:var(--text-muted); margin-top:.25rem; }
@@ -1551,7 +1551,7 @@ a {
 @media (max-width:760px) { .parametres-features { grid-template-columns:1fr; } }
 
 
-/* ---- Assistant IA intégré à la Sidebar ---- */
+/* ---- Assistant IA int├®gr├® ├á la Sidebar ---- */
 .app-sidebar { position: relative; }
 .app-sidebar__assistant-wrap { position: relative; margin-top: auto; }
 .app-sidebar__assistant-trigger { width: 100%; border: 0; background: transparent; cursor: pointer; text-align: start; }
@@ -1585,7 +1585,7 @@ a {
 @media (max-width: 768px) { .assistant-panel, .assistant-panel--rtl { position: fixed; left: 12px; right:12px; bottom:12px; width:auto; height:min(70vh,560px); } }
 [dir="rtl"] .app-sidebar__assistant-wrap { direction:rtl; }
 
-/* Améliorations du module Clients : suggestions, détection de doublons et fiche détaillée */
+/* Am├®liorations du module Clients : suggestions, d├®tection de doublons et fiche d├®taill├®e */
 .clients-form { margin-bottom: 1.25rem; }
 .clients-suggestion { display:flex; align-items:center; flex-wrap:wrap; gap:.45rem; margin-top:.45rem; padding:.65rem .75rem; border:1px solid #c7d2fe; border-radius:.65rem; background:#eef2ff; color:#3730a3; font-size:.88rem; }
 .clients-suggestion button { border:0; border-radius:.4rem; padding:.3rem .55rem; background:#4338ca; color:#fff; font-weight:600; cursor:pointer; }
@@ -1678,7 +1678,7 @@ a {
 .activite-gravite--avertissement { color: #b45309; }
 .activite-gravite--critique { color: #b91c1c; font-weight: 600; }
 
-/* ---- Pages publiques : Fonctionnalités et Tarifs ---- */
+/* ---- Pages publiques : Fonctionnalit├®s et Tarifs ---- */
 .vitrine {
   max-width: 1040px;
   margin: 0 auto;
@@ -1780,7 +1780,7 @@ a {
 .champ-suggestions__meta { color: var(--text-muted); font-size: 0.74rem; }
 
 /* ======================================================================
-   Pages publiques animées : Fonctionnalités et Tarifs
+   Pages publiques anim├®es : Fonctionnalit├®s et Tarifs
    ====================================================================== */
 .vitrine-page {
   position: relative;
@@ -1793,7 +1793,7 @@ a {
 }
 .vitrine-page .vitrine { position: relative; z-index: 1; }
 
-/* ---- Fond animé ---- */
+/* ---- Fond anim├® ---- */
 .fond-anime { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .fond-anime__blob {
   position: absolute;
@@ -1877,7 +1877,7 @@ a {
 .apparition { opacity: 0; transform: translateY(28px) scale(0.97); transition: opacity 0.6s ease, transform 0.6s cubic-bezier(.2,.8,.2,1); height: 100%; }
 .apparition--visible { opacity: 1; transform: none; }
 
-/* ---- Cartes fonctionnalités (cliquables) ---- */
+/* ---- Cartes fonctionnalit├®s (cliquables) ---- */
 .feat-grille {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -1929,7 +1929,7 @@ a {
 @keyframes icone-saut { 0% { transform: scale(0.6); } 100% { transform: scale(1); } }
 .feat-carte__titre { position: relative; }
 
-/* ---- Panneau de détail ---- */
+/* ---- Panneau de d├®tail ---- */
 .feat-detail {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
@@ -1973,7 +1973,7 @@ a {
 @keyframes barre-respire { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.82); } }
 @media (max-width: 760px) { .feat-detail { grid-template-columns: 1fr; padding: 1.4rem; } }
 
-/* ---- Bouton animé ---- */
+/* ---- Bouton anim├® ---- */
 .vitrine__bouton--anime {
   position: relative; overflow: hidden;
   border-radius: 999px;
@@ -2022,7 +2022,7 @@ a {
 .vitrine-plan p.vitrine-plan__avantage { display: flex; align-items: flex-start; gap: 0.4rem; margin: 0.4rem 0 1.25rem; }
 .vitrine-plan__avantage svg { color: var(--teal); flex: none; margin-top: 3px; }
 
-/* Respecte les préférences d'accessibilité */
+/* Respecte les pr├®f├®rences d'accessibilit├® */
 @media (prefers-reduced-motion: reduce) {
   .fond-anime *, .feat-detail, .feat-detail *, .vitrine__titre--anime, .vitrine__intro--anime,
   .vitrine__bouton--anime::after, .vitrine-plan--vedette, .feat-carte__icone {
@@ -2033,8 +2033,8 @@ a {
 
 /* ======================================================================
    Boutons flottants (menu d'aide, notifications, assistant IA)
-   Position : extrême droite en français/anglais (LTR), extrême gauche en
-   arabe (RTL). Le conteneur reçoit la classe --rtl selon la langue du site.
+   Position : extr├¬me droite en fran├ºais/anglais (LTR), extr├¬me gauche en
+   arabe (RTL). Le conteneur re├ºoit la classe --rtl selon la langue du site.
    ====================================================================== */
 .boutons-flottants {
   position: fixed;
@@ -2047,7 +2047,7 @@ a {
   max-width: calc(100vw - 32px);
 }
 .boutons-flottants--rtl { right: auto; left: 22px; }
-/* Chaque élément se range du côté « fin » de la langue (droite en LTR, gauche en RTL). */
+/* Chaque ├®l├®ment se range du c├┤t├® ┬½ fin ┬╗ de la langue (droite en LTR, gauche en RTL). */
 .boutons-flottants > * { margin-inline-start: auto; }
 
 .boutons-flottants__principal {
@@ -2174,7 +2174,7 @@ a {
 }
 .boutons-flottants__notification-lire:hover { background: color-mix(in srgb, var(--teal) 16%, transparent); }
 
-/* Assistant IA ouvert depuis le bouton flottant : fixé près du bouton, côté de la langue du site */
+/* Assistant IA ouvert depuis le bouton flottant : fix├® pr├¿s du bouton, c├┤t├® de la langue du site */
 .boutons-flottants .assistant-panel {
   position: fixed;
   right: 22px; left: auto;
@@ -2197,7 +2197,7 @@ a {
   .boutons-flottants__principal, .boutons-flottants__item { transition: none; }
 }
 
-/* ---- Menu flottant : réglages rapides (mode sombre, langue) ---- */
+/* ---- Menu flottant : r├®glages rapides (mode sombre, langue) ---- */
 .boutons-flottants__reglages { margin-top: 0.35rem; padding-top: 0.45rem; border-top: 1px solid var(--paper-line); display: flex; flex-direction: column; gap: 0.3rem; }
 .boutons-flottants__langues { display: flex; align-items: center; gap: 0.4rem; padding: 0.35rem 0.8rem; color: var(--text-muted); }
 .boutons-flottants__langues button {
@@ -2338,18 +2338,18 @@ a {
 .boutons-flottants__principal.a-couleur.est-ouvert { background: var(--ink); }
 .boutons-flottants__item.a-couleur svg { color: var(--bf-couleur); }
 
-/* Positions choisies par l'administrateur (« auto » = comportement d'origine, sans classe). */
+/* Positions choisies par l'administrateur (┬½ auto ┬╗ = comportement d'origine, sans classe). */
 .boutons-flottants.boutons-flottants--bas-droite, .boutons-flottants.boutons-flottants--milieu-droite, .boutons-flottants.boutons-flottants--haut-droite { right: 22px; left: auto; }
 .boutons-flottants.boutons-flottants--bas-gauche, .boutons-flottants.boutons-flottants--milieu-gauche, .boutons-flottants.boutons-flottants--haut-gauche { left: 22px; right: auto; }
 .boutons-flottants.boutons-flottants--bas-droite > *, .boutons-flottants.boutons-flottants--milieu-droite > *, .boutons-flottants.boutons-flottants--haut-droite > * { margin-inline: 0; margin-left: auto; }
 .boutons-flottants.boutons-flottants--bas-gauche > *, .boutons-flottants.boutons-flottants--milieu-gauche > *, .boutons-flottants.boutons-flottants--haut-gauche > * { margin-inline: 0; margin-right: auto; }
 .boutons-flottants.boutons-flottants--haut-droite, .boutons-flottants.boutons-flottants--haut-gauche {
-  top: 88px; bottom: auto; flex-direction: column-reverse;   /* sous l'en-tête ; le menu s'ouvre vers le bas */
+  top: 88px; bottom: auto; flex-direction: column-reverse;   /* sous l'en-t├¬te ; le menu s'ouvre vers le bas */
 }
 .boutons-flottants.boutons-flottants--milieu-droite, .boutons-flottants.boutons-flottants--milieu-gauche { top: 50%; bottom: auto; transform: translateY(-50%); }
 .boutons-flottants--haut-droite .boutons-flottants__menu, .boutons-flottants--haut-gauche .boutons-flottants__menu { transform-origin: top right; }
 
-/* Boutons « libres » : isolés, à l'ancrage choisi ; décalés si le menu d'aide occupe déjà le même coin. */
+/* Boutons ┬½ libres ┬╗ : isol├®s, ├á l'ancrage choisi ; d├®cal├®s si le menu d'aide occupe d├®j├á le m├¬me coin. */
 .boutons-libres { position: fixed; z-index: 1090; display: flex; flex-direction: column; gap: 10px; }
 .boutons-libres--bas-droite, .boutons-libres--milieu-droite, .boutons-libres--haut-droite { right: 22px; align-items: flex-end; }
 .boutons-libres--bas-gauche, .boutons-libres--milieu-gauche, .boutons-libres--haut-gauche { left: 22px; align-items: flex-start; }
@@ -2393,3 +2393,8 @@ a {
 .bfadmin-icone[aria-pressed="true"] { background: var(--brass); color: #fff; border-color: var(--brass-dark); }
 .bfadmin-hist li { margin: .25rem 0; font-size: .85rem; }
 @media (max-width: 640px) { .bfadmin-table th:nth-child(4), .bfadmin-table td:nth-child(4) { display: none; } }
+.assistant-panel__voice { display:flex; flex-wrap:wrap; gap:.35rem; padding:.5rem .7rem; border-bottom:1px solid var(--paper-line); background:var(--carte-fond); }
+.assistant-panel__voice button { display:inline-flex; align-items:center; justify-content:center; gap:.35rem; min-height:32px; border:1px solid var(--paper-line); border-radius:7px; padding:.35rem .5rem; background:var(--paper); color:var(--text-dark); cursor:pointer; font:inherit; font-size:.68rem; }
+.assistant-panel__voice button:hover:not(:disabled), .assistant-panel__voice button[aria-pressed="true"] { border-color:var(--brass); background:color-mix(in srgb, var(--brass) 12%, var(--carte-fond)); }
+.assistant-panel__voice button:disabled { opacity:.45; cursor:not-allowed; }
+.assistant-panel__voice-status { margin:0; padding:.35rem .75rem; color:var(--text-muted); background:var(--paper); font-size:.7rem; }

@@ -21,6 +21,7 @@ from app.routers.notifications import notifier_action
 from app.security.auth_dependency import exiger_role_admin
 from app.security.permissions import exiger_permission
 from app.services import moteur_calcul as moteur
+from app.services.moteur_regles_metier import assurer_schema, calculer_penalite_retard
 from app.services.moteur_calcul import ErreurCalcul, PeriodeTaux
 from app.services.provisioning import DOSSIER_TEMPLATE
 from app.utils import rapport_calcul
@@ -51,6 +52,7 @@ def _pool(utilisateur: dict):
             raise
         finally:
             pool.putconn(conn)
+    assurer_schema(pool, nom_base)
     return pool
 
 
@@ -459,6 +461,261 @@ def supprimer_periode(periode_id: int, utilisateur: dict = Depends(exiger_role_a
     if utilisee:
         return {"archivee": True, "message": "Cette période est utilisée par des calculs enregistrés : elle a été archivée (les anciens calculs restent intacts)."}
     return {"archivee": False, "message": "Période supprimée."}
+
+
+# --- registre des règles métier, historique et anomalies ---------------------------------
+class RegleMetierPayload(BaseModel):
+    code: str = Field(min_length=2, max_length=60, pattern=r"^[A-Z0-9_]+$")
+    libelle: str = Field(min_length=2, max_length=160)
+    type_regle: str = Field(pattern=r"^(tva|remise|penalite|taux|autre)$")
+    module_source: str = Field(default="general", min_length=1, max_length=40)
+    taux: Decimal = Field(ge=0, le=100)
+    priorite: int = 0
+    actif: bool = True
+    date_debut: date | None = None
+    date_fin: date | None = None
+    configuration: dict = Field(default_factory=dict)
+
+
+def _valider_dates_regle(payload: RegleMetierPayload):
+    if payload.date_debut and payload.date_fin and payload.date_fin < payload.date_debut:
+        raise HTTPException(
+            status_code=400,
+            detail="La date de fin doit être postérieure ou égale à la date de début."
+        )
+
+
+@router.get("/regles-metier")
+def lister_regles_metier(
+    utilisateur: dict = Depends(exiger_permission("calculs", "consulter"))
+):
+    pool = _pool(utilisateur)
+    conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, code, libelle, type_regle, module_source, taux,
+                       priorite, actif, date_debut, date_fin, configuration, cree_le
+                FROM regle_calcul_metier
+                ORDER BY type_regle, priorite DESC, code
+            """)
+            return {"regles": _dicts(cur)}
+    finally:
+        pool.putconn(conn)
+
+
+@router.post("/regles-metier", status_code=201)
+def enregistrer_regle_metier(
+    payload: RegleMetierPayload,
+    utilisateur: dict = Depends(exiger_role_admin)
+):
+    _valider_dates_regle(payload)
+
+    pool = _pool(utilisateur)
+    conn = pool.getconn()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO regle_calcul_metier
+                    (code, libelle, type_regle, module_source, taux,
+                     priorite, actif, date_debut, date_fin, configuration, cree_par)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+                RETURNING id, code, libelle, type_regle, module_source, taux,
+                          priorite, actif, date_debut, date_fin, configuration, cree_le
+            """, (
+                payload.code,
+                payload.libelle.strip(),
+                payload.type_regle,
+                payload.module_source.strip(),
+                payload.taux,
+                payload.priorite,
+                payload.actif,
+                payload.date_debut,
+                payload.date_fin,
+                json.dumps(payload.configuration, ensure_ascii=False),
+                _auteur(utilisateur),
+            ))
+
+            resultat = _dicts(cur)[0]
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        pool.putconn(conn)
+
+    return resultat
+
+
+@router.put("/regles-metier/{regle_id}")
+def modifier_regle_metier(
+    regle_id: int,
+    payload: RegleMetierPayload,
+    utilisateur: dict = Depends(exiger_role_admin)
+):
+    _valider_dates_regle(payload)
+
+    pool = _pool(utilisateur)
+    conn = pool.getconn()
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE regle_calcul_metier
+                SET code = %s,
+                    libelle = %s,
+                    type_regle = %s,
+                    module_source = %s,
+                    taux = %s,
+                    priorite = %s,
+                    actif = %s,
+                    date_debut = %s,
+                    date_fin = %s,
+                    configuration = %s::jsonb
+                WHERE id = %s
+                RETURNING id, code, libelle, type_regle, module_source, taux,
+                          priorite, actif, date_debut, date_fin, configuration, cree_le
+            """, (
+                payload.code,
+                payload.libelle.strip(),
+                payload.type_regle,
+                payload.module_source.strip(),
+                payload.taux,
+                payload.priorite,
+                payload.actif,
+                payload.date_debut,
+                payload.date_fin,
+                json.dumps(payload.configuration, ensure_ascii=False),
+                regle_id,
+            ))
+
+            lignes = _dicts(cur)
+
+            if not lignes:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Règle métier introuvable."
+                )
+
+            resultat = lignes[0]
+
+        conn.commit()
+
+    except Exception:
+        conn.rollback()
+        raise
+
+    finally:
+        pool.putconn(conn)
+
+    return resultat
+
+@router.get("/historique-metier")
+def historique_metier(module: str | None = None, limite: int = Query(default=100, ge=1, le=500),
+                      utilisateur: dict = Depends(exiger_permission("calculs", "consulter"))):
+    pool = _pool(utilisateur); conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT id,module_source,type_document,document_id,reference,montant_ht,montant_tva,montant_ttc,details,cree_par,cree_le
+                           FROM historique_calcul_metier WHERE (%s IS NULL OR module_source=%s)
+                           ORDER BY cree_le DESC LIMIT %s""", (module,module,limite))
+            return {"historique": _dicts(cur)}
+    finally: pool.putconn(conn)
+
+
+@router.get("/anomalies-metier")
+def anomalies_metier(statut: str = "nouvelle", limite: int = Query(default=100, ge=1, le=500),
+                     utilisateur: dict = Depends(exiger_permission("calculs", "consulter"))):
+    if statut not in {"nouvelle","examinee","ignoree","toutes"}:
+        raise HTTPException(status_code=400, detail="Statut d'anomalie invalide.")
+    pool = _pool(utilisateur); conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT id,module_source,type_document,document_id,code,gravite,message,details,statut,cree_le
+                           FROM anomalie_calcul_metier WHERE (%s='toutes' OR statut=%s)
+                           ORDER BY cree_le DESC LIMIT %s""", (statut,statut,limite))
+            return {"anomalies": _dicts(cur)}
+    finally: pool.putconn(conn)
+
+
+@router.patch("/anomalies-metier/{anomalie_id}")
+def statut_anomalie_metier(anomalie_id: int, statut: str,
+                           utilisateur: dict = Depends(exiger_role_admin)):
+    if statut not in {"examinee","ignoree","nouvelle"}:
+        raise HTTPException(status_code=400, detail="Statut d'anomalie invalide.")
+    pool = _pool(utilisateur); conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE anomalie_calcul_metier SET statut=%s WHERE id=%s RETURNING id", (statut,anomalie_id))
+            if not cur.fetchone(): raise HTTPException(status_code=404, detail="Anomalie introuvable.")
+        conn.commit()
+    except Exception:
+        conn.rollback(); raise
+    finally: pool.putconn(conn)
+    return {"message":"Statut de l'anomalie mis à jour."}
+
+
+@router.put("/produits/{produit_id}/tva")
+def definir_tva_produit(produit_id: int, taux_tva: Decimal = Query(ge=0, le=100),
+                        utilisateur: dict = Depends(exiger_role_admin)):
+    pool = _pool(utilisateur); conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE produit SET taux_tva=%s WHERE id=%s RETURNING id,taux_tva", (taux_tva,produit_id))
+            row = cur.fetchone()
+            if not row: raise HTTPException(status_code=404, detail="Produit introuvable.")
+        conn.commit()
+    except Exception:
+        conn.rollback(); raise
+    finally: pool.putconn(conn)
+    return {"produit_id":row[0],"taux_tva":str(row[1])}
+
+
+@router.put("/factures/{facture_id}/echeance")
+def definir_echeance_facture(facture_id: int, date_echeance: date,
+                             utilisateur: dict = Depends(exiger_role_admin)):
+    pool = _pool(utilisateur); conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE facture SET date_echeance=%s WHERE id=%s RETURNING id", (date_echeance,facture_id))
+            if not cur.fetchone(): raise HTTPException(status_code=404, detail="Facture introuvable.")
+        conn.commit()
+    except Exception:
+        conn.rollback(); raise
+    finally: pool.putconn(conn)
+    return {"message":"Date d'échéance enregistrée."}
+
+
+@router.post("/factures/{facture_id}/penalite-retard")
+def appliquer_penalite_retard(facture_id: int,
+                              utilisateur: dict = Depends(exiger_permission("calculs", "creer"))):
+    pool = _pool(utilisateur); conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT montant_total,statut,date_echeance FROM facture WHERE id=%s FOR UPDATE", (facture_id,))
+            facture = cur.fetchone()
+            if not facture: raise HTTPException(status_code=404, detail="Facture introuvable.")
+            if facture[1] != 'impayee': raise HTTPException(status_code=409, detail="Seules les factures impayées peuvent recevoir une pénalité.")
+            try: resultat = calculer_penalite_retard(cur, facture[0], facture[2])
+            except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc))
+            if resultat['jours_retard'] <= 0: raise HTTPException(status_code=400, detail="La facture n'est pas encore en retard.")
+            cur.execute("UPDATE facture SET montant_penalite=%s WHERE id=%s", (resultat['penalite'],facture_id))
+            details = json.dumps({**{k:str(v) for k,v in resultat.items()},'date_echeance':facture[2].isoformat()},ensure_ascii=False)
+            cur.execute("""INSERT INTO historique_calcul_metier
+                (module_source,type_document,document_id,reference,montant_ht,montant_tva,montant_ttc,details,cree_par)
+                VALUES ('ventes','penalite_retard',%s,%s,0,0,%s,%s::jsonb,%s)
+                ON CONFLICT (module_source,type_document,document_id) DO UPDATE SET
+                montant_ttc=EXCLUDED.montant_ttc,details=EXCLUDED.details,cree_par=EXCLUDED.cree_par,cree_le=NOW()""",
+                (facture_id,f'FACTURE-{facture_id}',resultat['penalite'],details,_auteur(utilisateur)))
+        conn.commit()
+    except Exception:
+        conn.rollback(); raise
+    finally: pool.putconn(conn)
+    return {"facture_id":facture_id,**{k:str(v) for k,v in resultat.items()}}
 
 
 # --- calcul : lecture, modification, suppression, export ---------------------------------

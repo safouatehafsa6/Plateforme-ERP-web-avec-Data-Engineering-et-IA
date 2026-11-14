@@ -1,0 +1,367 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  X, Trash2, Send, Sparkles, Paperclip,
+  Mic, MicOff, Volume2, VolumeX, BellRing,
+} from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { API_BASE_URL } from "../api/config";
+import DocumentsRag from "./DocumentsRag";
+import ChampSuggestions from "./ChampSuggestions";
+
+const LANGUES = [
+  { code: "fr", label: "FR", speech: "fr-FR" },
+  { code: "en", label: "EN", speech: "en-US" },
+  { code: "ar", label: "ع", speech: "ar-MA" },
+];
+
+const MODULES = {
+  dashboard: "dashboard", ventes: "ventes", achats: "achats",
+  fournisseurs: "fournisseurs", clients: "clients", stock: "stock",
+  facturation: "facturation", comptabilite: "comptabilite",
+  parametres: "parametres", collaborateurs: "collaborateurs",
+  "roles-permissions": "roles-permissions",
+  "utilisateurs-externes": "utilisateurs-externes",
+};
+
+function getModule(pathname) {
+  const key = pathname.replace(/^\//, "").split("/")[0] || "dashboard";
+  return MODULES[key] || "dashboard";
+}
+
+const TEXTES = {
+  fr: {
+    title: "Assistant IA", placeholder: "Écrivez votre question…", clear: "Effacer",
+    close: "Fermer", send: "Envoyer", welcome: "Bonjour ! Je peux vous guider dans l’ERP et adapter mon aide au module actuel.",
+    context: "Contexte", suggestions: ["Créer une commande", "Synthèse des ventes", "Produits les plus vendus", "Top clients"],
+    micStart: "Démarrer la saisie vocale", micStop: "Arrêter la saisie vocale",
+    voiceOn: "Activer les réponses vocales", voiceOff: "Désactiver les réponses vocales",
+    readNotifications: "Lire mes notifications non lues", listening: "Je vous écoute…",
+    micUnsupported: "La reconnaissance vocale n’est pas prise en charge par ce navigateur.",
+    micDenied: "Accès au microphone refusé. Autorisez-le dans les paramètres du navigateur.",
+    micError: "La saisie vocale a échoué. Réessayez.", notificationsNone: "Vous n’avez aucune notification non lue.",
+    notificationsError: "Impossible de récupérer les notifications.", speechUnsupported: "La lecture vocale n’est pas prise en charge par ce navigateur.", moduleOpened: "Ouverture du module", documentsOpened: "Espace documentaire ouvert.",
+  },
+  en: {
+    title: "AI Assistant", placeholder: "Write your question…", clear: "Clear",
+    close: "Close", send: "Send", welcome: "Hello! I can guide you through the ERP and adapt my help to the current module.",
+    context: "Context", suggestions: ["Create an order", "Sales summary", "Top products", "Top customers"],
+    micStart: "Start voice input", micStop: "Stop voice input",
+    voiceOn: "Enable spoken replies", voiceOff: "Disable spoken replies",
+    readNotifications: "Read my unread notifications", listening: "Listening…",
+    micUnsupported: "Speech recognition is not supported by this browser.",
+    micDenied: "Microphone access denied. Allow it in your browser settings.",
+    micError: "Voice input failed. Please try again.", notificationsNone: "You have no unread notifications.",
+    notificationsError: "Could not retrieve notifications.", speechUnsupported: "Spoken playback is not supported by this browser.", moduleOpened: "Opening module", documentsOpened: "Document area opened.",
+  },
+  ar: {
+    title: "مساعد الذكاء الاصطناعي", placeholder: "اكتب سؤالك…", clear: "مسح",
+    close: "إغلاق", send: "إرسال", welcome: "مرحباً! يمكنني إرشادك داخل منصة ERP وتكييف المساعدة حسب الوحدة الحالية.",
+    context: "السياق", suggestions: ["إنشاء طلب", "ملخص المبيعات", "أكثر المنتجات مبيعاً", "أفضل العملاء"],
+    micStart: "بدء الإدخال الصوتي", micStop: "إيقاف الإدخال الصوتي",
+    voiceOn: "تفعيل الردود الصوتية", voiceOff: "إيقاف الردود الصوتية",
+    readNotifications: "قراءة إشعاراتي غير المقروءة", listening: "أنا أستمع إليك…",
+    micUnsupported: "التعرف على الكلام غير مدعوم في هذا المتصفح.",
+    micDenied: "تم رفض الوصول إلى الميكروفون. يرجى السماح به من إعدادات المتصفح.",
+    micError: "تعذر الإدخال الصوتي. حاول مرة أخرى.", notificationsNone: "ليس لديك إشعارات غير مقروءة.",
+    notificationsError: "تعذر جلب الإشعارات.", speechUnsupported: "تشغيل الصوت غير مدعوم في هذا المتصفح.", moduleOpened: "جارٍ فتح الوحدة", documentsOpened: "تم فتح مساحة المستندات.",
+  },
+};
+
+function getSpeechRecognition() {
+  if (typeof window === "undefined") return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+export default function AssistantIA({ open, onClose }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [langue, setLangue] = useState(() => localStorage.getItem("erp_assistant_lang") || "fr");
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [state, setState] = useState({ operation: null, step: null, data: {} });
+  const [docsOpen, setDocsOpen] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceListening, setVoiceListening] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState("");
+  const recognitionRef = useRef(null);
+
+  const module = useMemo(() => getModule(location.pathname), [location.pathname]);
+  const ui = TEXTES[langue] || TEXTES.fr;
+  const rtl = langue === "ar";
+  const speechSupported = typeof window !== "undefined"
+    && Boolean(window.speechSynthesis)
+    && typeof window.SpeechSynthesisUtterance === "function";
+
+  const parler = useCallback((texte) => {
+    if (!speechSupported || !texte) return;
+    window.speechSynthesis.cancel();
+    const utterance = new window.SpeechSynthesisUtterance(String(texte));
+    utterance.lang = LANGUES.find((l) => l.code === langue)?.speech || "fr-FR";
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    window.speechSynthesis.speak(utterance);
+  }, [langue, speechSupported]);
+
+  useEffect(() => { localStorage.setItem("erp_assistant_lang", langue); }, [langue]);
+
+  useEffect(() => {
+    if (open && messages.length === 0) setMessages([{ role: "assistant", text: ui.welcome }]);
+  }, [open, langue]);
+
+  useEffect(() => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setVoiceListening(false);
+    setVoiceStatus("");
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  }, [langue]);
+
+  useEffect(() => () => {
+    if (recognitionRef.current) recognitionRef.current.stop();
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  }, []);
+
+  const envoyerTexte = useCallback(async (texte) => {
+    const question = String(texte || "").trim();
+    if (!question || sending) return;
+    setMessages((m) => [...m, { role: "user", text: question }]);
+    setInput("");
+    setSending(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/assistant/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({ message: question, langue, module, state }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || "assistant_error");
+      if (data.state) setState(data.state);
+      const reply = data.reply || "";
+      setMessages((m) => [...m, {
+        role: "assistant", text: reply,
+        sources: Array.isArray(data.sources) ? data.sources : [],
+      }]);
+      if (voiceEnabled && reply) parler(reply);
+    } catch {
+      const fallback = langue === "ar"
+        ? "تعذر الاتصال بالمساعد حالياً."
+        : langue === "en"
+          ? "The assistant could not be reached right now."
+          : "Impossible de contacter l’assistant pour le moment.";
+      setMessages((m) => [...m, { role: "assistant", text: fallback }]);
+      if (voiceEnabled) parler(fallback);
+    } finally {
+      setSending(false);
+    }
+  }, [langue, module, state, sending, voiceEnabled, parler]);
+
+  async function envoyer(e) {
+    e?.preventDefault();
+    await envoyerTexte(input);
+  }
+
+  function traiterCommandeVocale(texte) {
+    const normalise = String(texte || "").toLocaleLowerCase(langue)
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const commandes = [
+      { path: "/dashboard", mots: ["ouvrir tableau de bord", "ouvrir dashboard", "open dashboard", "افتح لوحة التحكم"] },
+      { path: "/ventes", mots: ["ouvrir ventes", "ouvre ventes", "ouvrir le module ventes", "ouvre le module ventes", "open sales", "open sales module", "افتح المبيعات"] },
+      { path: "/achats", mots: ["ouvrir achats", "ouvre achats", "ouvrir le module achats", "open purchases", "افتح المشتريات"] },
+      { path: "/clients", mots: ["ouvrir clients", "ouvre clients", "ouvrir le module clients", "open customers", "افتح العملاء"] },
+      { path: "/fournisseurs", mots: ["ouvrir fournisseurs", "ouvre fournisseurs", "ouvrir le module fournisseurs", "open suppliers", "افتح الموردين"] },
+      { path: "/stock", mots: ["ouvrir stock", "ouvre stock", "ouvrir le module stock", "open inventory", "افتح المخزون"] },
+      { path: "/facturation", mots: ["ouvrir facturation", "ouvre facturation", "ouvrir le module facturation", "open invoicing", "افتح الفوترة"] },
+      { path: "/comptabilite", mots: ["ouvrir comptabilite", "ouvrir comptabilite", "open accounting", "افتح المحاسبة"] },
+      { path: "/calculs", mots: ["ouvrir calculs", "open calculations"] },
+      { path: "/room-live", mots: ["ouvrir room live", "open room live"] },
+    ];
+    const moduleCommande = commandes.find((item) => item.mots.some((mot) => normalise === mot || normalise === `va dans ${mot}`));
+    if (moduleCommande) {
+      navigate(moduleCommande.path);
+      const reponse = `${ui.moduleOpened} ${moduleCommande.path.replace("/", "")}.`;
+      setMessages((m) => [...m, { role: "assistant", text: reponse }]);
+      if (voiceEnabled) parler(reponse);
+      return true;
+    }
+    if (["ouvrir documents", "ouvrir les documents", "chercher dans les documents", "rechercher un document", "open documents", "search documents", "افتح المستندات", "ابحث في المستندات"].includes(normalise)) {
+      setDocsOpen(true);
+      setMessages((m) => [...m, { role: "assistant", text: ui.documentsOpened }]);
+      if (voiceEnabled) parler(ui.documentsOpened);
+      return true;
+    }
+    if (["lire notifications", "ouvrir notifications", "mes notifications", "afficher notifications", "read notifications", "open notifications", "show notifications", "اقرا الاشعارات", "اعرض الاشعارات"].includes(normalise)) {
+      void lireNotifications();
+      return true;
+    }
+    return false;
+  }
+
+  function demarrerMicro() {
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) {
+      setVoiceStatus(ui.micUnsupported);
+      return;
+    }
+    if (recognitionRef.current) recognitionRef.current.stop();
+
+    const recognition = new Recognition();
+    recognition.lang = LANGUES.find((l) => l.code === langue)?.speech || "fr-FR";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => {
+      setVoiceListening(true);
+      setVoiceStatus(ui.listening);
+    };
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setVoiceStatus("");
+        if (!traiterCommandeVocale(transcript)) void envoyerTexte(transcript);
+      }
+    };
+    recognition.onerror = (event) => {
+      setVoiceListening(false);
+      setVoiceStatus(event.error === "not-allowed" || event.error === "service-not-allowed"
+        ? ui.micDenied : ui.micError);
+    };
+    recognition.onend = () => {
+      setVoiceListening(false);
+      recognitionRef.current = null;
+    };
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch {
+      setVoiceListening(false);
+      setVoiceStatus(ui.micError);
+      recognitionRef.current = null;
+    }
+  }
+
+  function arreterMicro() {
+    recognitionRef.current?.stop();
+    setVoiceListening(false);
+  }
+
+  async function lireNotifications() {
+    const token = localStorage.getItem("token");
+    if (!token) {
+      setVoiceStatus(ui.notificationsError);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE_URL}/notifications?limit=10&non_lues_seulement=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || ui.notificationsError);
+      const items = Array.isArray(data.notifications) ? data.notifications : [];
+      if (!items.length) {
+        setVoiceStatus(ui.notificationsNone);
+        parler(ui.notificationsNone);
+        return;
+      }
+      const texte = items.slice(0, 5).map((n, index) =>
+        `${index + 1}. ${n.titre}. ${n.message}`
+      ).join(". ");
+      setMessages((m) => [...m, { role: "assistant", text: texte }]);
+      setVoiceStatus("");
+      parler(texte);
+    } catch {
+      setVoiceStatus(ui.notificationsError);
+    }
+  }
+
+  function effacer() {
+    setMessages([]);
+    setState({ operation: null, step: null, data: {} });
+    setInput("");
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+  }
+
+  if (!open) return null;
+
+  return (
+    <section className={`assistant-panel${rtl ? " assistant-panel--rtl" : ""}`} dir={rtl ? "rtl" : "ltr"} aria-label={ui.title}>
+      <header className="assistant-panel__header">
+        <div className="assistant-panel__titre">
+          <span className="assistant-panel__icone"><Sparkles size={16} /></span>
+          <div><strong>{ui.title}</strong><small>{ui.context}: {module}</small></div>
+        </div>
+        <div className="assistant-panel__actions">
+          <button type="button" onClick={() => setDocsOpen((v) => !v)} title="Documents" aria-label="Documents" aria-pressed={docsOpen}><Paperclip size={16} /></button>
+          <button type="button" onClick={effacer} title={ui.clear} aria-label={ui.clear}><Trash2 size={16} /></button>
+          <button type="button" onClick={onClose} title={ui.close} aria-label={ui.close}><X size={18} /></button>
+        </div>
+      </header>
+
+      <div className="assistant-panel__langues" aria-label="Assistant language">
+        {LANGUES.map((l) => <button key={l.code} type="button" className={langue === l.code ? "actif" : ""} onClick={() => setLangue(l.code)} aria-pressed={langue === l.code}>{l.label}</button>)}
+      </div>
+
+      <div className="assistant-panel__voice" aria-label="Voice controls">
+        <button type="button" onClick={() => {
+          if (!speechSupported) {
+            setVoiceStatus(ui.speechUnsupported);
+            return;
+          }
+          setVoiceEnabled((v) => {
+            const next = !v;
+            if (!next && window.speechSynthesis) window.speechSynthesis.cancel();
+            return next;
+          });
+          setVoiceStatus("");
+        }} aria-pressed={voiceEnabled} title={voiceEnabled ? ui.voiceOff : ui.voiceOn}>
+          {voiceEnabled ? <Volume2 size={16} /> : <VolumeX size={16} />}
+          <span>{voiceEnabled ? ui.voiceOff : ui.voiceOn}</span>
+        </button>
+        <button type="button" onClick={voiceListening ? arreterMicro : demarrerMicro} disabled={sending} aria-pressed={voiceListening} title={voiceListening ? ui.micStop : ui.micStart}>
+          {voiceListening ? <MicOff size={16} /> : <Mic size={16} />}
+          <span>{voiceListening ? ui.micStop : ui.micStart}</span>
+        </button>
+        <button type="button" onClick={lireNotifications} title={ui.readNotifications}>
+          <BellRing size={16} /><span>{ui.readNotifications}</span>
+        </button>
+      </div>
+      {voiceStatus && <p className="assistant-panel__voice-status" role="status">{voiceStatus}</p>}
+
+      {docsOpen && <DocumentsRag langue={langue} />}
+      <div className="assistant-panel__messages" aria-live="polite" aria-relevant="additions">
+        {messages.map((m, i) => (
+          <div key={i} className={`assistant-message assistant-message--${m.role}`}>
+            <div>{m.text}</div>
+            {m.role === "assistant" && m.sources?.length > 0 && (
+              <div className="assistant-sources">
+                <strong>{langue === "en" ? "Sources" : langue === "ar" ? "المصادر" : "Sources"}</strong>
+                {m.sources.map((source, j) => (
+                  <details key={`${source.id}-${j}`}>
+                    <summary>[{j + 1}] {source.title} · {source.source}</summary>
+                    <small>{source.module}</small><p>{source.excerpt}</p>
+                  </details>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        {sending && <div className="assistant-message assistant-message--assistant">…</div>}
+        {messages.length <= 1 && (
+          <div className="assistant-panel__suggestions">
+            {ui.suggestions.map((s) => <button key={s} type="button" onClick={() => setInput(s)}>{s}</button>)}
+          </div>
+        )}
+      </div>
+
+      <form className="assistant-panel__form" onSubmit={envoyer}>
+        <ChampSuggestions value={input} onChange={setInput} placeholder={ui.placeholder} ariaLabel={ui.placeholder} langue={langue} module={module} />
+        <button type="submit" disabled={!input.trim() || sending} title={ui.send} aria-label={ui.send}><Send size={17} /></button>
+      </form>
+    </section>
+  );
+}

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from app.db import get_pool_entreprise
 from app.security.permissions import exiger_permission
 from app.routers.notifications import creer_notification
+from app.services.moteur_regles_metier import assurer_schema, calculer_document
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,9 @@ class LivraisonPayload(BaseModel):
 
 
 def _pool(utilisateur):
-    return get_pool_entreprise(utilisateur["nomBase"])
+    pool = get_pool_entreprise(utilisateur["nomBase"])
+    assurer_schema(pool, utilisateur["nomBase"])
+    return pool
 
 
 def _dicts(cur):
@@ -445,6 +448,16 @@ def facturer_commande(commande_id: int, utilisateur=Depends(exiger_permission("f
                 """,
                 (fid, commande_id)
             )
+            # Calcul centralisé : remise commerciale, TVA produit (ou règle par défaut), HT et TTC.
+            cur.execute("""SELECT lf.produit_id, lf.designation, lf.quantite, lf.prix_unitaire,
+                                  lf.remise_pct, p.taux_tva
+                           FROM ligne_facture lf JOIN produit p ON p.id=lf.produit_id
+                           WHERE lf.facture_id=%s ORDER BY lf.id""", (fid,))
+            lignes_calcul = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
+            resultat = calculer_document(cur, module='ventes', type_document='facture',
+                document_id=fid, lignes=lignes_calcul, auteur=str(utilisateur.get('id') or ''), reference=numero)
+            cur.execute("UPDATE facture SET montant_total=%s, montant_ht=%s, montant_tva=%s WHERE id=%s",
+                (resultat['montant_ttc'], resultat['montant_ht'], resultat['montant_tva'], fid))
 
         conn.commit()
 
@@ -463,6 +476,27 @@ def facturer_commande(commande_id: int, utilisateur=Depends(exiger_permission("f
     )
 
     return {"id": fid, "numero": numero, "message": "Facture créée."}
+
+@router.get("/factures")
+def lister_factures(utilisateur=Depends(exiger_permission("facturation", "consulter"))):
+    pool = _pool(utilisateur)
+    conn = pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT f.id, f.numero, f.date_facture,
+                       f.montant_total, f.montant_ht, f.montant_tva,
+                       f.statut, c.nom AS client_nom,
+                       cmd.numero AS commande_numero
+                FROM facture f
+                LEFT JOIN commande cmd ON cmd.id = f.commande_id
+                LEFT JOIN client c ON c.id = cmd.client_id
+                ORDER BY f.date_facture DESC NULLS LAST, f.id DESC
+            """)
+            factures = _dicts(cur)
+    finally:
+        pool.putconn(conn)
+    return {"factures": factures}
 
 @router.patch("/factures/{facture_id}/statut")
 def statut_facture(facture_id: int, payload: StatutPayload, utilisateur=Depends(exiger_permission("facturation", "valider"))):

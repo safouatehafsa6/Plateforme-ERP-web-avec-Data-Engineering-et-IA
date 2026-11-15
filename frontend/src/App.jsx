@@ -31,6 +31,7 @@ import Support from "./pages/Support";
 import Contact from "./pages/Contact";
 import Calculs from "./pages/Calculs";
 import RoomLive from "./pages/RoomLive";
+import Idp from "./pages/Idp";
 
 // Le Header est rendu une seule fois ici, en dehors des <Routes> :
 // il reste donc affiché en continu quelle que soit la page consultée,
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="/support" element={<Support />} />
             <Route path="/calculs" element={<Calculs />} />
             <Route path="/room-live" element={<RoomLive />} />
+            <Route path="/documents-ia" element={<Idp />} />
             <Route path="/inscription" element={<Inscription />} />
             <Route path="/mot-de-passe-oublie" element={<MotDePasseOublie />} />
             <Route path="/dashboard" element={<TableauDeBord />} />

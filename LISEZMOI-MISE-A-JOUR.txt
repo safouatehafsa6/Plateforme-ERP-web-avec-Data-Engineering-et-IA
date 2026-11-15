@@ -1,0 +1,20 @@
+VERSION COMPLETE DU PROJET : Documents IA (IDP) integres au module Achats
+=========================================================================
+
+Nouveaute : un document IDP VALIDE (facture, bon de commande, devis) peut etre integre
+dans le module Achats : bouton "Integrer dans Achats" sur la page Documents IA.
+
+Installation :
+1) Extraire ce ZIP a l'emplacement du projet (ne pas ecraser votre fichier .env).
+2) docker compose up -d --build backend frontend
+3) Ctrl+Maj+R dans le navigateur.
+
+Rappels de configuration (.env, UNE seule ligne par variable) :
+   RAG_LLM_BASE_URL=http://192.168.244.1:11434/v1
+   RAG_LLM_MODEL=qwen2.5:3b
+   RAG_LLM_TIMEOUT=300
+
+Verification :
+   docker compose ps
+   curl http://localhost:8000/api/health
+   docker compose exec backend python -m unittest discover -s tests -t .

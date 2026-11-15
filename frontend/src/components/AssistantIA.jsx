@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   X, Trash2, Send, Sparkles, Paperclip,
-  Mic, MicOff, Volume2, VolumeX, BellRing,
+  Mic, MicOff, Volume2, VolumeX, BellRing, Headphones,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../api/config";
+import { deconnecter } from "../api/sessionsApi";
+import { interpreter } from "../validation/commandesVocales";
 import DocumentsRag from "./DocumentsRag";
 import ChampSuggestions from "./ChampSuggestions";
 
@@ -35,7 +37,7 @@ const TEXTES = {
     context: "Contexte", suggestions: ["Créer une commande", "Synthèse des ventes", "Produits les plus vendus", "Top clients"],
     micStart: "Démarrer la saisie vocale", micStop: "Arrêter la saisie vocale",
     voiceOn: "Activer les réponses vocales", voiceOff: "Désactiver les réponses vocales",
-    readNotifications: "Lire mes notifications non lues", listening: "Je vous écoute…",
+    readNotifications: "Lire mes notifications non lues", listening: "Je vous écoute…", conversationOn: "Mode conversation", conversationOff: "Arrêter la conversation", conversationStarted: "Mode conversation activé. Je vous écoute.", conversationStopped: "Mode conversation désactivé.", conversationEnded: "Conversation terminée : aucune parole détectée.", confirmLogout: "Voulez-vous vraiment vous déconnecter ? Dites oui pour confirmer ou non pour annuler.", cancelled: "Action annulée.",
     micUnsupported: "La reconnaissance vocale n’est pas prise en charge par ce navigateur.",
     micDenied: "Accès au microphone refusé. Autorisez-le dans les paramètres du navigateur.",
     micError: "La saisie vocale a échoué. Réessayez.", notificationsNone: "Vous n’avez aucune notification non lue.",
@@ -47,7 +49,7 @@ const TEXTES = {
     context: "Context", suggestions: ["Create an order", "Sales summary", "Top products", "Top customers"],
     micStart: "Start voice input", micStop: "Stop voice input",
     voiceOn: "Enable spoken replies", voiceOff: "Disable spoken replies",
-    readNotifications: "Read my unread notifications", listening: "Listening…",
+    readNotifications: "Read my unread notifications", listening: "Listening…", conversationOn: "Conversation mode", conversationOff: "Stop conversation", conversationStarted: "Conversation mode on. I am listening.", conversationStopped: "Conversation mode off.", conversationEnded: "Conversation ended: no speech detected.", confirmLogout: "Do you really want to sign out? Say yes to confirm or no to cancel.", cancelled: "Action cancelled.",
     micUnsupported: "Speech recognition is not supported by this browser.",
     micDenied: "Microphone access denied. Allow it in your browser settings.",
     micError: "Voice input failed. Please try again.", notificationsNone: "You have no unread notifications.",
@@ -59,7 +61,7 @@ const TEXTES = {
     context: "السياق", suggestions: ["إنشاء طلب", "ملخص المبيعات", "أكثر المنتجات مبيعاً", "أفضل العملاء"],
     micStart: "بدء الإدخال الصوتي", micStop: "إيقاف الإدخال الصوتي",
     voiceOn: "تفعيل الردود الصوتية", voiceOff: "إيقاف الردود الصوتية",
-    readNotifications: "قراءة إشعاراتي غير المقروءة", listening: "أنا أستمع إليك…",
+    readNotifications: "قراءة إشعاراتي غير المقروءة", listening: "أنا أستمع إليك…", conversationOn: "وضع المحادثة", conversationOff: "إيقاف المحادثة", conversationStarted: "تم تفعيل وضع المحادثة. أنا أستمع إليك.", conversationStopped: "تم إيقاف وضع المحادثة.", conversationEnded: "انتهت المحادثة: لم يتم رصد أي كلام.", confirmLogout: "هل تريد فعلاً تسجيل الخروج؟ قل نعم للتأكيد أو لا للإلغاء.", cancelled: "تم إلغاء الإجراء.",
     micUnsupported: "التعرف على الكلام غير مدعوم في هذا المتصفح.",
     micDenied: "تم رفض الوصول إلى الميكروفون. يرجى السماح به من إعدادات المتصفح.",
     micError: "تعذر الإدخال الصوتي. حاول مرة أخرى.", notificationsNone: "ليس لديك إشعارات غير مقروءة.",
@@ -85,6 +87,14 @@ export default function AssistantIA({ open, onClose }) {
   const [voiceListening, setVoiceListening] = useState(false);
   const [voiceStatus, setVoiceStatus] = useState("");
   const recognitionRef = useRef(null);
+  const [conversation, setConversation] = useState(false);     // mode mains libres (écoute -> réponse parlée -> écoute)
+  const [confirmation, setConfirmation] = useState(null);      // action sensible en attente d'un « oui » oral
+  const conversationRef = useRef(false);
+  const confirmationRef = useRef(null);
+  const relancerMicroRef = useRef(null);
+  const silencesRef = useRef(0);
+  conversationRef.current = conversation;
+  confirmationRef.current = confirmation;
 
   const module = useMemo(() => getModule(location.pathname), [location.pathname]);
   const ui = TEXTES[langue] || TEXTES.fr;
@@ -93,13 +103,14 @@ export default function AssistantIA({ open, onClose }) {
     && Boolean(window.speechSynthesis)
     && typeof window.SpeechSynthesisUtterance === "function";
 
-  const parler = useCallback((texte) => {
-    if (!speechSupported || !texte) return;
+  const parler = useCallback((texte, surFin) => {
+    if (!speechSupported || !texte) { if (surFin) surFin(); return; }
     window.speechSynthesis.cancel();
     const utterance = new window.SpeechSynthesisUtterance(String(texte));
     utterance.lang = LANGUES.find((l) => l.code === langue)?.speech || "fr-FR";
     utterance.rate = 1;
     utterance.pitch = 1;
+    if (surFin) { utterance.onend = surFin; utterance.onerror = surFin; }   // enchaîne l'écoute en mode conversation
     window.speechSynthesis.speak(utterance);
   }, [langue, speechSupported]);
 
@@ -120,6 +131,7 @@ export default function AssistantIA({ open, onClose }) {
   }, [langue]);
 
   useEffect(() => () => {
+    conversationRef.current = false;
     if (recognitionRef.current) recognitionRef.current.stop();
     if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
   }, []);
@@ -147,7 +159,8 @@ export default function AssistantIA({ open, onClose }) {
         role: "assistant", text: reply,
         sources: Array.isArray(data.sources) ? data.sources : [],
       }]);
-      if (voiceEnabled && reply) parler(reply);
+      if (voiceEnabled && reply) parler(reply, conversationRef.current ? () => relancerMicroRef.current?.() : undefined);
+      else if (conversationRef.current) relancerMicroRef.current?.();
     } catch {
       const fallback = langue === "ar"
         ? "تعذر الاتصال بالمساعد حالياً."
@@ -166,40 +179,88 @@ export default function AssistantIA({ open, onClose }) {
     await envoyerTexte(input);
   }
 
+  function repondre(texte, surFin) {
+    setMessages((m) => [...m, { role: "assistant", text: texte }]);
+    if (voiceEnabled || conversationRef.current) parler(texte, surFin);
+    else if (surFin) surFin();
+  }
+
+  async function executerDeconnexion() {
+    conversationRef.current = false;
+    setConversation(false);
+    if (typeof window !== "undefined" && window.speechSynthesis) window.speechSynthesis.cancel();
+    await deconnecter();
+    navigate("/");
+  }
+
+  // Renvoie true si la phrase était une commande (traitée ici), false si c'est une question pour l'IA.
   function traiterCommandeVocale(texte) {
-    const normalise = String(texte || "").toLocaleLowerCase(langue)
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-    const commandes = [
-      { path: "/dashboard", mots: ["ouvrir tableau de bord", "ouvrir dashboard", "open dashboard", "افتح لوحة التحكم"] },
-      { path: "/ventes", mots: ["ouvrir ventes", "ouvre ventes", "ouvrir le module ventes", "ouvre le module ventes", "open sales", "open sales module", "افتح المبيعات"] },
-      { path: "/achats", mots: ["ouvrir achats", "ouvre achats", "ouvrir le module achats", "open purchases", "افتح المشتريات"] },
-      { path: "/clients", mots: ["ouvrir clients", "ouvre clients", "ouvrir le module clients", "open customers", "افتح العملاء"] },
-      { path: "/fournisseurs", mots: ["ouvrir fournisseurs", "ouvre fournisseurs", "ouvrir le module fournisseurs", "open suppliers", "افتح الموردين"] },
-      { path: "/stock", mots: ["ouvrir stock", "ouvre stock", "ouvrir le module stock", "open inventory", "افتح المخزون"] },
-      { path: "/facturation", mots: ["ouvrir facturation", "ouvre facturation", "ouvrir le module facturation", "open invoicing", "افتح الفوترة"] },
-      { path: "/comptabilite", mots: ["ouvrir comptabilite", "ouvrir comptabilite", "open accounting", "افتح المحاسبة"] },
-      { path: "/calculs", mots: ["ouvrir calculs", "open calculations"] },
-      { path: "/room-live", mots: ["ouvrir room live", "open room live"] },
-    ];
-    const moduleCommande = commandes.find((item) => item.mots.some((mot) => normalise === mot || normalise === `va dans ${mot}`));
-    if (moduleCommande) {
-      navigate(moduleCommande.path);
-      const reponse = `${ui.moduleOpened} ${moduleCommande.path.replace("/", "")}.`;
-      setMessages((m) => [...m, { role: "assistant", text: reponse }]);
-      if (voiceEnabled) parler(reponse);
-      return true;
+    const commande = interpreter(texte, { confirmationEnAttente: Boolean(confirmationRef.current) });
+    if (!commande) {
+      if (confirmationRef.current) setConfirmation(null);   // phrase sans rapport : par prudence, rien n'est exécuté
+      return false;
     }
-    if (["ouvrir documents", "ouvrir les documents", "chercher dans les documents", "rechercher un document", "open documents", "search documents", "افتح المستندات", "ابحث في المستندات"].includes(normalise)) {
-      setDocsOpen(true);
-      setMessages((m) => [...m, { role: "assistant", text: ui.documentsOpened }]);
-      if (voiceEnabled) parler(ui.documentsOpened);
-      return true;
+    const relance = conversationRef.current ? () => relancerMicroRef.current?.() : undefined;
+    switch (commande.type) {
+      case "confirmer": {
+        const action = confirmationRef.current;
+        setConfirmation(null);
+        if (action === "deconnexion") void executerDeconnexion();
+        return true;
+      }
+      case "annuler":
+        setConfirmation(null);
+        repondre(ui.cancelled, relance);
+        return true;
+      case "navigation":
+        navigate(commande.chemin);
+        repondre(`${ui.moduleOpened} ${commande.nom}.`, relance);
+        return true;
+      case "documents":
+        setDocsOpen(true);
+        repondre(ui.documentsOpened, relance);
+        return true;
+      case "notifications":
+        void lireNotifications();
+        return true;
+      case "deconnexion":
+        // Action sensible : jamais exécutée sur la seule parole, une confirmation orale est exigée.
+        setConfirmation("deconnexion");
+        repondre(ui.confirmLogout, () => relancerMicroRef.current?.());
+        return true;
+      case "conversation":
+        if (commande.actif) {
+          silencesRef.current = 0;
+          conversationRef.current = true;
+          setConversation(true);
+          setVoiceEnabled(true);
+          repondre(ui.conversationStarted, () => relancerMicroRef.current?.());
+        } else {
+          conversationRef.current = false;
+          setConversation(false);
+          repondre(ui.conversationStopped);
+        }
+        return true;
+      default:
+        return false;
     }
-    if (["lire notifications", "ouvrir notifications", "mes notifications", "afficher notifications", "read notifications", "open notifications", "show notifications", "اقرا الاشعارات", "اعرض الاشعارات"].includes(normalise)) {
-      void lireNotifications();
-      return true;
+  }
+
+  function basculerConversation() {
+    if (!getSpeechRecognition()) { setVoiceStatus(ui.micUnsupported); return; }
+    if (!speechSupported) { setVoiceStatus(ui.speechUnsupported); return; }
+    if (conversationRef.current) {
+      conversationRef.current = false;
+      setConversation(false);
+      recognitionRef.current?.stop();
+      window.speechSynthesis.cancel();
+      return;
     }
-    return false;
+    silencesRef.current = 0;
+    conversationRef.current = true;
+    setConversation(true);
+    setVoiceEnabled(true);
+    demarrerMicro();
   }
 
   function demarrerMicro() {
@@ -215,6 +276,7 @@ export default function AssistantIA({ open, onClose }) {
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.maxAlternatives = 1;
+    let resultatRecu = false;
     recognition.onstart = () => {
       setVoiceListening(true);
       setVoiceStatus(ui.listening);
@@ -222,6 +284,8 @@ export default function AssistantIA({ open, onClose }) {
     recognition.onresult = (event) => {
       const transcript = event.results?.[0]?.[0]?.transcript?.trim();
       if (transcript) {
+        resultatRecu = true;
+        silencesRef.current = 0;
         setVoiceStatus("");
         if (!traiterCommandeVocale(transcript)) void envoyerTexte(transcript);
       }
@@ -233,11 +297,25 @@ export default function AssistantIA({ open, onClose }) {
       });
 
       setVoiceListening(false);
-      setVoiceStatus(`Erreur microphone : ${event.error}`);
+      if (event.error === "no-speech" && conversationRef.current) return;   // silence : géré dans onend
+      const refuse = event.error === "not-allowed" || event.error === "service-not-allowed";
+      setVoiceStatus(refuse ? ui.micDenied : `${ui.micError} (${event.error})`);
+      conversationRef.current = false;
+      setConversation(false);
     };
     recognition.onend = () => {
       setVoiceListening(false);
       recognitionRef.current = null;
+      if (conversationRef.current && !resultatRecu) {
+        silencesRef.current += 1;
+        if (silencesRef.current >= 3) {            // trois silences d'affilée : on rend la main
+          conversationRef.current = false;
+          setConversation(false);
+          setVoiceStatus(ui.conversationEnded);
+        } else {
+          setTimeout(() => { if (conversationRef.current) relancerMicroRef.current?.(); }, 400);
+        }
+      }
     };
     recognitionRef.current = recognition;
     try {
@@ -253,6 +331,8 @@ export default function AssistantIA({ open, onClose }) {
     recognitionRef.current?.stop();
     setVoiceListening(false);
   }
+
+  relancerMicroRef.current = demarrerMicro;
 
   async function lireNotifications() {
     const token = localStorage.getItem("token");
@@ -329,6 +409,10 @@ export default function AssistantIA({ open, onClose }) {
         <button type="button" onClick={voiceListening ? arreterMicro : demarrerMicro} disabled={sending} aria-pressed={voiceListening} title={voiceListening ? ui.micStop : ui.micStart}>
           {voiceListening ? <MicOff size={16} /> : <Mic size={16} />}
           <span>{voiceListening ? ui.micStop : ui.micStart}</span>
+        </button>
+        <button type="button" onClick={basculerConversation} aria-pressed={conversation} title={conversation ? ui.conversationOff : ui.conversationOn}>
+          <Headphones size={16} />
+          <span>{conversation ? ui.conversationOff : ui.conversationOn}</span>
         </button>
         <button type="button" onClick={lireNotifications} title={ui.readNotifications}>
           <BellRing size={16} /><span>{ui.readNotifications}</span>

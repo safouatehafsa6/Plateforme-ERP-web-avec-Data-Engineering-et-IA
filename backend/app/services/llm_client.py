@@ -84,7 +84,8 @@ def _classify(response: httpx.Response) -> LLMError:
     return LLMError("http", status)
 
 
-def chat_completion(messages: list[dict], *, temperature: float = 0.1, extra: dict | None = None) -> str:
+def chat_completion(messages: list[dict], *, temperature: float = 0.1, extra: dict | None = None,
+                    timeout: float | None = None) -> str:
     """Appelle /chat/completions. Lève LLMError (jamais d'exception brute, jamais de secret)."""
     cfg = get_config()
     if cfg is None:
@@ -99,7 +100,7 @@ def chat_completion(messages: list[dict], *, temperature: float = 0.1, extra: di
     payload = {"model": cfg["model"], "temperature": temperature, "messages": messages, **(extra or {})}
 
     try:
-        response = httpx.post(cfg["base_url"] + "/chat/completions", headers=headers, json=payload, timeout=cfg["timeout"])
+        response = httpx.post(cfg["base_url"] + "/chat/completions", headers=headers, json=payload, timeout=timeout or cfg["timeout"])
     except httpx.TimeoutException:
         err = LLMError("timeout")
     except httpx.TransportError:

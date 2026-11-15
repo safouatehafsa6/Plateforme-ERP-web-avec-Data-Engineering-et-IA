@@ -14,15 +14,17 @@ exigent le rôle administrateur. Pour affiner (par exemple une permission
 dédiée), ne changer que `_acces` ci-dessous et les dépendances des deux routes
 de décision.
 """
+import json
 import logging
 from typing import Annotated, Union
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import exiger_role_admin
 from app.security.permissions import exiger_permission
+from app.services import idp_integration
 from app.services import idp_stockage as stockage
 from app.services import idp_structuration as structuration
 from app.services.idp_extraction import (
@@ -35,6 +37,20 @@ from app.services.idp_extraction import (
 logger = logging.getLogger("erp.idp")
 
 router = APIRouter(prefix="/api/idp", tags=["idp"])
+
+# Causes d'échec du modèle -> message utile pour l'utilisateur (aucune URL, aucun secret).
+_MESSAGES_MODELE = {
+    "unreachable": "Le modèle IA est injoignable depuis le serveur (Ollama est-il démarré et accessible ?).",
+    "model_missing": ("Le modèle IA « {modele} » est introuvable sur le serveur : installez-le avec « ollama pull {modele} », "
+                      "ou vérifiez que RAG_LLM_BASE_URL se termine par /v1."),
+    "timeout": "Le modèle IA a mis trop de temps à répondre : réessayez avec un document plus court ou un modèle plus rapide.",
+    "cooldown": "Le modèle IA vient d'échouer : nouvelle tentative possible dans quelques minutes.",
+    "auth": "L'accès au modèle IA est refusé (clé invalide).",
+    "quota": "Le quota du modèle IA est épuisé.",
+    "rate_limit": "Le modèle IA est temporairement saturé : réessayez dans un instant.",
+    "texte_vide": "Aucun texte n'a pu être lu dans ce document (image illisible ou OCR indisponible).",
+    "sortie_invalide": "Le modèle a répondu dans un format inexploitable : réessayez, ou utilisez un modèle plus puissant.",
+}
 
 _acces = exiger_permission("documents", "creer")
 
@@ -109,6 +125,27 @@ class Corrections(_Strict):
     total_tva: Valeur = None
     total_ttc: Valeur = None
     taux_tva: Valeur = None
+    # Structure libre (sections / champs / tableaux découverts) : assainie et bornée côté serveur.
+    structure_libre: dict | None = None
+
+    @field_validator("structure_libre")
+    @classmethod
+    def _taille_structure(cls, valeur):
+        if valeur is not None and len(json.dumps(valeur, ensure_ascii=False)) > 200_000:
+            raise ValueError("Structure trop volumineuse.")
+        return valeur
+
+
+class ChoixLigne(_Strict):
+    index: int = Field(ge=0, le=1000)
+    produit_id: int | None = Field(default=None, ge=1)
+    creer: bool = False
+
+
+class ChoixIntegration(_Strict):
+    fournisseur_id: int | None = Field(default=None, ge=1)
+    creer_fournisseur: bool = False
+    lignes: list[ChoixLigne] = Field(max_length=1000)
 
 
 class Rejet(_Strict):
@@ -133,8 +170,11 @@ def deposer_document(
         raise HTTPException(422, "Le fichier est vide.")
     nom = fichier.filename or ""
 
+    pool = _pool(utilisateur)
+    champs_connus = stockage.noms_champs_personnalises(pool)
+    options = {"champs_connus": champs_connus} if champs_connus else {}
     try:
-        resultat = structuration.traiter_document(contenu, nom)
+        resultat = structuration.traiter_document(contenu, nom, **options)
     except FichierTropVolumineux as exc:
         raise HTTPException(413, str(exc)) from exc
     except FormatNonSupporte as exc:
@@ -147,11 +187,13 @@ def deposer_document(
     except structuration.StructurationEchouee as exc:
         logger.exception("Le modèle n'a pas pu structurer le document")
         raise HTTPException(
-            502, "Le modèle d'analyse n'a pas pu lire ce document. Réessayez plus tard.") from exc
+            502,
+            _MESSAGES_MODELE.get(getattr(exc, "code", None), "").replace("{modele}", structuration.nom_modele())
+            or "Le modèle d'analyse n'a pas pu lire ce document. Réessayez plus tard.") from exc
 
     try:
         depot = stockage.enregistrer_depot(
-            _pool(utilisateur), resultat, contenu, nom,
+            pool, resultat, contenu, nom,
             prefixe=utilisateur["nomBase"], depose_par=_acteur(utilisateur),
         )
     except stockage.StockageErreur as exc:
@@ -166,6 +208,40 @@ def deposer_document(
         "resume": resultat["resume"],
         "avertissements": resultat["avertissements"],
     }
+
+
+@router.get("/documents/{document_id}/integration")
+def proposition_integration(document_id: int, utilisateur: dict = Depends(utilisateur_idp)):
+    """Ce que l'intégration dans Achats ferait pour ce document validé (aucune écriture)."""
+    try:
+        return idp_integration.proposer(_pool(utilisateur), document_id)
+    except stockage.StockageErreur as exc:
+        raise _http(exc)
+
+
+@router.post("/documents/{document_id}/integrer")
+def integrer_document(document_id: int, choix: ChoixIntegration,
+                      utilisateur: dict = Depends(exiger_permission("achats", "creer"))):
+    """Crée dans Achats le document d'achat correspondant, après confirmation des choix par l'utilisateur."""
+    if utilisateur.get("type") != "interne" or not utilisateur.get("nomBase"):
+        raise HTTPException(403, "Réservé aux utilisateurs internes de l'entreprise.")
+    try:
+        resultat = idp_integration.integrer(
+            _pool(utilisateur), utilisateur["nomBase"], document_id, choix.model_dump(), _acteur(utilisateur))
+    except idp_integration.IntegrationErreur as exc:
+        raise HTTPException(exc.statut, exc.detail) from exc
+    except stockage.StockageErreur as exc:
+        raise _http(exc)
+    from app.routers.notifications import notifier_action      # import tardif : évite un cycle au démarrage
+    notifier_action(utilisateur, "Document intégré dans Achats",
+                    f"Le document IDP n°{document_id} a créé {resultat['numero']}.", "/achats")
+    return resultat
+
+
+@router.get("/champs-personnalises")
+def champs_personnalises(utilisateur: dict = Depends(utilisateur_idp)):
+    """Champs découverts par l'IA dans des documents validés et réutilisés ensuite."""
+    return stockage.lister_champs_personnalises(_pool(utilisateur))
 
 
 @router.get("/documents")

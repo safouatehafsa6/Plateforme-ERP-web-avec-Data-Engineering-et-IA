@@ -122,7 +122,8 @@ def _recuperer_facture_du_client(pool_tenant, facture_id: int, client_id: int):
 
 
 @router.get("/factures/{facture_id}/pdf")
-def telecharger_facture_pdf(facture_id: int, utilisateur=Depends(exiger_utilisateur_externe)):
+def telecharger_facture_pdf(facture_id: int, langue: str = "fr", utilisateur=Depends(exiger_utilisateur_externe)):
+    """PDF de la facture ; ?langue=en pour l'anglais (fr par défaut ; l'arabe retombe sur le français)."""
     pool_tenant = get_pool_entreprise(utilisateur["nomBase"])
     ligne = _recuperer_facture_du_client(pool_tenant, facture_id, utilisateur["clientId"])
     if not ligne:
@@ -140,6 +141,7 @@ def telecharger_facture_pdf(facture_id: int, utilisateur=Depends(exiger_utilisat
         entreprise_nom="BENJEDDOU ERP",
         code_verification=code_verification,
         url_verification=url_verification,
+        langue=langue,
     )
 
     return Response(

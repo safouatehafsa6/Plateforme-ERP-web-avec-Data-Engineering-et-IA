@@ -29,9 +29,46 @@ from app.services.idp_controles import (
     resume_anomalies,
     verifier_document,
 )
+from app.services import idp_structure_libre, llm_client
 from app.services.idp_extraction import DocumentLu, empreinte_fichier, lire_document
 
 MAX_CARACTERES_MODELE = 30_000
+LIMITE_MODELE_LOCAL = 8_000        # texte envoyé par défaut à un modèle local (Ollama)
+
+
+def limite_caracteres() -> int:
+    """Texte maximal envoyé au modèle (variable IDP_MAX_CARACTERES). Avec un petit modèle local
+    sur processeur, 6000 à 8000 réduit fortement le temps d'analyse."""
+    brut = os.getenv("IDP_MAX_CARACTERES", "").strip()
+    if brut:
+        try:
+            return max(1000, int(brut))
+        except ValueError:
+            return MAX_CARACTERES_MODELE
+    # Sans réglage explicite : un modèle local (Ollama) est lent, on lui envoie moins de texte.
+    config = llm_client.get_config()
+    if config and config["provider"] == "ollama" and not os.getenv("OPENAI_API_KEY", "").strip():
+        return LIMITE_MODELE_LOCAL
+    return MAX_CARACTERES_MODELE
+
+
+def delai_modele() -> float:
+    """Délai d'un appel au modèle pour l'IDP (secondes). Un modèle local sur processeur peut avoir
+    besoin de plusieurs minutes : au moins 600 s par défaut, réglable avec IDP_LLM_TIMEOUT."""
+    try:
+        valeur = float(os.getenv("IDP_LLM_TIMEOUT", "") or 0)
+    except ValueError:
+        valeur = 0
+    if valeur > 0:
+        return valeur
+    config = llm_client.get_config()
+    delai_config = config["timeout"] if config else 0
+    return max(delai_config, 600.0) if (config and config["provider"] == "ollama") else (delai_config or 60.0)
+
+
+def structure_libre_activee() -> bool:
+    """IDP_STRUCTURE_LIBRE=0 supprime la seconde passe (champs découverts) : analyse 2 fois plus rapide."""
+    return os.getenv("IDP_STRUCTURE_LIBRE", "1").strip().lower() not in ("0", "non", "false", "off")
 DELAI_MODELE_SECONDES = 60.0
 NB_ESSAIS_SORTIE_INVALIDE = 2
 
@@ -51,7 +88,15 @@ class StructurationIndisponible(Exception):
 
 
 class StructurationEchouee(Exception):
-    """Le modèle n'a pas répondu ou sa réponse est inexploitable."""
+    """Le modèle n'a pas répondu ou sa réponse est inexploitable.
+
+    `code` classe la cause (unreachable, model_missing, timeout, auth, quota, rate_limit, cooldown,
+    texte_vide, sortie_invalide...) : la route en déduit un message utile, sans jamais exposer
+    d'URL ni de secret."""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 # --------------------------------------------------------------------------
@@ -204,7 +249,12 @@ _CONSIGNES = (
 
 
 def nom_modele() -> str:
-    return os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    """Modèle effectivement utilisé : OpenAI si une clé est fournie, sinon le LLM de la
+    plateforme (Ollama local par défaut, voir llm_client)."""
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
+    config = llm_client.get_config()
+    return config["model"] if config else os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip()
 
 
 def preparer_texte(doc: DocumentLu) -> tuple[str, bool]:
@@ -217,11 +267,12 @@ def preparer_texte(doc: DocumentLu) -> tuple[str, bool]:
         ]
         parties.append(f"[Tableau {numero}]\n" + "\n".join(lignes))
     texte = "\n\n".join(p for p in parties if p)
-    tronque = len(texte) > MAX_CARACTERES_MODELE
-    return texte[:MAX_CARACTERES_MODELE], tronque
+    limite = limite_caracteres()
+    tronque = len(texte) > limite
+    return texte[:limite], tronque
 
 
-def _appeler_openai(texte: str) -> str:
+def _appeler_openai(texte: str, consignes: str | None = None) -> str:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise StructurationIndisponible("OPENAI_API_KEY n'est pas configurée.")
@@ -239,7 +290,7 @@ def _appeler_openai(texte: str) -> str:
                 "temperature": 0,
                 "response_format": {"type": "json_object"},
                 "messages": [
-                    {"role": "system", "content": _CONSIGNES},
+                    {"role": "system", "content": consignes or _CONSIGNES},
                     {"role": "user", "content": f"<document>\n{contenu}\n</document>"},
                 ],
             },
@@ -252,6 +303,26 @@ def _appeler_openai(texte: str) -> str:
         raise StructurationEchouee(
             f"Appel au modèle impossible ({type(exc).__name__})."
         ) from exc
+
+
+def _appeler_modele(texte: str, consignes: str | None = None) -> str:
+    """Appelle le modèle configuré : OpenAI si OPENAI_API_KEY est définie, sinon le même LLM que
+    l'assistant (LLM_PROVIDER : Ollama local par défaut, aucune clé nécessaire)."""
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return _appeler_openai(texte, consignes)
+    if llm_client.get_config() is None:
+        raise StructurationIndisponible(
+            "Aucun modèle n'est configuré (définir OPENAI_API_KEY, ou LLM_PROVIDER=ollama).")
+    contenu = texte.replace("</document>", "")
+    try:
+        return llm_client.chat_completion(
+            [{"role": "system", "content": consignes or _CONSIGNES},
+             {"role": "user", "content": f"<document>\n{contenu}\n</document>"}],
+            temperature=0,
+            timeout=delai_modele(),
+        )
+    except llm_client.LLMError as exc:
+        raise StructurationEchouee(f"Appel au modèle impossible ({exc.kind}).", code=exc.kind) from exc
 
 
 def _parser_json(brut: str | dict) -> dict:
@@ -278,8 +349,8 @@ def structurer(
     par défaut l'API OpenAI-compatible. Injecter un faux dans les tests."""
     texte, tronque = preparer_texte(doc)
     if not texte.strip():
-        raise StructurationEchouee("Aucun texte à analyser dans ce document.")
-    appeler = appeler or _appeler_openai
+        raise StructurationEchouee("Aucun texte à analyser dans ce document.", code="texte_vide")
+    appeler = appeler or _appeler_modele
 
     derniere_erreur: Exception | None = None
     for _ in range(NB_ESSAIS_SORTIE_INVALIDE):
@@ -292,13 +363,13 @@ def structurer(
     else:
         raise StructurationEchouee(
             "Réponse du modèle inexploitable "
-            f"({type(derniere_erreur).__name__})."
+            f"({type(derniere_erreur).__name__}).", code="sortie_invalide"
         ) from derniere_erreur
 
     avertissements = list(doc.avertissements or [])
     if tronque:
         avertissements.append(
-            f"Texte tronqué à {MAX_CARACTERES_MODELE} caractères avant analyse."
+            f"Texte tronqué à {limite_caracteres()} caractères avant analyse."
         )
     if doc.ocr_utilise:
         avertissements.append("Texte issu de l'OCR : vérifier les montants.")
@@ -310,11 +381,34 @@ def traiter_document(
     nom_fichier: str = "",
     *,
     appeler: Callable[[str], str | dict] | None = None,
+    appeler_libre: Callable[[str], str | dict] | None = None,
+    champs_connus: set[str] | None = None,
 ) -> dict:
-    """Chaîne complète : lecture -> structuration -> contrôles -> empreintes.
-    Les incohérences deviennent des anomalies, pas des exceptions."""
+    """Chaîne complète : lecture -> structuration -> structure libre -> contrôles -> empreintes.
+    Les incohérences deviennent des anomalies, pas des exceptions.
+
+    La structure libre (champs et sections découverts) est une seconde passe facultative : si le
+    modèle échoue, le document reste exploitable avec le schéma standard et un avertissement.
+    Quand un faux `appeler` est injecté (tests), elle n'est lancée que si `appeler_libre` l'est aussi."""
     doc = lire_document(contenu, nom_fichier)
     resultat = structurer(doc, appeler=appeler)
+    if structure_libre_activee() and (appeler is None or appeler_libre is not None):
+        texte_doc, _ = preparer_texte(doc)
+        try:
+            libre = idp_structure_libre.extraire(
+                texte_doc,
+                appeler_libre or (lambda t: _appeler_modele(t, idp_structure_libre.CONSIGNES)),
+                champs_connus,
+            )
+            if libre["sections"] or libre["tableaux"]:
+                resultat.donnees["structure_libre"] = libre
+            if not libre["sections"]:
+                resultat.avertissements = list(resultat.avertissements) + [
+                    "Le modèle n'a pas identifié de champs dans ce document : un modèle plus puissant "
+                    "(par exemple qwen2.5:7b) donne de meilleurs résultats."]
+        except (StructurationIndisponible, StructurationEchouee, ValueError, ValidationError) as exc:
+            resultat.avertissements = list(resultat.avertissements) + [
+                f"Structure libre indisponible ({type(exc).__name__}) : schéma standard uniquement."]
     anomalies = verifier_document(resultat.donnees)
     return {
         "empreinte_fichier": empreinte_fichier(contenu),

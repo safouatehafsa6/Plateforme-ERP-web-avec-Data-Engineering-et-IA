@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass, asdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -87,6 +88,51 @@ def convertir_decimal(valeur) -> Decimal | None:
     return -nombre if negatif else nombre
 
 
+# Mois écrits en toutes lettres (français, anglais, arabe), sans accents ; les noms arabes sont
+# normalisés comme `_normaliser_date_texte` (alef unifiés, sans voyelles brèves).
+_MOIS = {
+    "janvier": 1, "janv": 1, "fevrier": 2, "fevr": 2, "fev": 2, "mars": 3, "avril": 4, "avr": 4, "mai": 5,
+    "juin": 6, "juillet": 7, "juil": 7, "aout": 8, "septembre": 9, "sept": 9, "octobre": 10, "oct": 10,
+    "novembre": 11, "nov": 11, "decembre": 12, "dec": 12,
+    "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3, "april": 4, "apr": 4, "may": 5,
+    "june": 6, "jun": 6, "july": 7, "jul": 7, "august": 8, "aug": 8, "september": 9, "sep": 9,
+    "october": 10, "november": 11, "december": 12,
+    "يناير": 1, "فبراير": 2, "مارس": 3, "ابريل": 4, "ماي": 5, "مايو": 5, "يونيو": 6, "يوليوز": 7, "يوليو": 7,
+    "غشت": 8, "اغسطس": 8, "شتنبر": 9, "سبتمبر": 9, "اكتوبر": 10, "نونبر": 11, "نوفمبر": 11, "دجنبر": 12,
+    "ديسمبر": 12,
+}
+_CHIFFRES_ARABES = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _normaliser_date_texte(texte: str) -> str:
+    t = unicodedata.normalize("NFD", texte.translate(_CHIFFRES_ARABES).lower())
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    t = re.sub(r"[\u064B-\u065F\u0670\u0640]", "", t)
+    t = re.sub("[أإآٱ]", "ا", t).replace("ى", "ي").replace("ة", "ه")
+    return re.sub(r"[.,،]", " ", t).strip()
+
+
+def _date_en_lettres(texte: str) -> date | None:
+    """« 9 novembre 2026 », « 09 nov. 2026 », « November 9th, 2026 », « 9 نوفمبر 2026 »."""
+    t = _normaliser_date_texte(texte)
+    t = re.sub(r"\b(le|du|the|of)\b", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    jour = mois = annee = None
+    m = re.fullmatch(r"(\d{1,2})(?:er|st|nd|rd|th)?\s+([^\W\d_]+)\s+(\d{4})", t)
+    if m:
+        jour, mois, annee = m.group(1), m.group(2), m.group(3)
+    else:
+        m = re.fullmatch(r"([^\W\d_]+)\s+(\d{1,2})(?:st|nd|rd|th)?\s+(\d{4})", t)
+        if m:
+            mois, jour, annee = m.group(1), m.group(2), m.group(3)
+    if mois is None or mois not in _MOIS:
+        return None
+    try:
+        return date(int(annee), _MOIS[mois], int(jour))
+    except ValueError:
+        return None
+
+
 def convertir_date(valeur) -> date | None:
     if isinstance(valeur, datetime):
         return valeur.date()
@@ -100,7 +146,21 @@ def convertir_date(valeur) -> date | None:
             return datetime.strptime(texte, format_date).date()
         except ValueError:
             continue
-    return None
+    return _date_en_lettres(texte)
+
+
+# Types de documents soumis aux règles commerciales (lignes, totaux, numéro, fournisseur obligatoires).
+# Un document d'un AUTRE type (rapport, contrat, courrier...) n'est pas une facture : ces règles
+# ne le bloquent pas. Un type absent garde le comportement historique (document commercial).
+_MOTS_COMMERCIAUX = (
+    "facture", "invoice", "avoir", "credit", "crédit", "commande", "purchase order", "devis", "quote",
+    "proforma", "livraison", "delivery", "فاتورة", "طلب شراء", "عرض سعر",
+)
+
+
+def est_document_commercial(type_document) -> bool:
+    bas = str(type_document or "").strip().lower()
+    return (not bas) or any(mot in bas for mot in _MOTS_COMMERCIAUX)
 
 
 def _fmt(valeur: Decimal | None) -> str | None:
@@ -127,14 +187,17 @@ def verifier_document(
     anomalies: list[Anomalie] = []
     ajouter = lambda *a, **k: anomalies.append(Anomalie(*a, **k))
     est_avoir = str(donnees.get("type_document", "")).lower() == "avoir"
+    commercial = est_document_commercial(donnees.get("type_document"))
+    # Hors document commercial, une information manquante est signalée sans bloquer la validation.
+    gravite_champ = "erreur" if commercial else "avertissement"
 
     # --- Champs obligatoires ------------------------------------------------
     if not str(donnees.get("numero") or "").strip():
-        ajouter("numero_manquant", "erreur", "numero", "Le numéro du document est absent.")
+        ajouter("numero_manquant", gravite_champ, "numero", "Le numéro du document est absent.")
 
     fournisseur = donnees.get("fournisseur") or {}
     if not str((fournisseur.get("nom") if isinstance(fournisseur, dict) else fournisseur) or "").strip():
-        ajouter("fournisseur_manquant", "erreur", "fournisseur.nom", "Le nom du fournisseur est absent.")
+        ajouter("fournisseur_manquant", gravite_champ, "fournisseur.nom", "Le nom du fournisseur est absent.")
     elif isinstance(fournisseur, dict) and fournisseur.get("ice"):
         ice = re.sub(r"\s", "", str(fournisseur["ice"]))
         if not re.fullmatch(r"\d{15}", ice):
@@ -144,9 +207,9 @@ def verifier_document(
     # --- Dates ----------------------------------------------------------------
     date_doc = convertir_date(donnees.get("date"))
     if not donnees.get("date"):
-        ajouter("date_manquante", "erreur", "date", "La date du document est absente.")
+        ajouter("date_manquante", gravite_champ, "date", "La date du document est absente.")
     elif date_doc is None:
-        ajouter("date_invalide", "erreur", "date", "La date du document n'est pas reconnue.",
+        ajouter("date_invalide", gravite_champ, "date", "La date du document n'est pas reconnue.",
                 None, str(donnees.get("date")))
     else:
         if date_doc > aujourdhui + timedelta(days=1):
@@ -175,7 +238,7 @@ def verifier_document(
 
     # --- Lignes ---------------------------------------------------------------
     lignes = donnees.get("lignes") or []
-    if not lignes:
+    if not lignes and commercial:
         ajouter("lignes_manquantes", "erreur", "lignes", "Aucune ligne d'article n'a été détectée.")
 
     somme_ht = Decimal("0")
@@ -232,7 +295,7 @@ def verifier_document(
     total_tva = convertir_decimal(donnees.get("total_tva"))
     total_ttc = convertir_decimal(donnees.get("total_ttc"))
 
-    if total_ttc is None:
+    if total_ttc is None and commercial:
         ajouter("total_ttc_manquant", "erreur", "total_ttc", "Le total TTC est absent.")
     if lignes and total_ht is not None and _ecart_significatif(somme_ht, total_ht):
         ajouter("total_ht_incoherent", "erreur", "total_ht",

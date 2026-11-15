@@ -25,13 +25,14 @@ import os
 import re
 from contextlib import contextmanager
 
+from app.services import idp_structure_libre
 from app.services.idp_controles import empreinte_document, verifier_document
 
 BUCKET_DOCUMENTS = "documents"
 STATUTS = ("brouillon", "valide", "rejete")
 CHAMPS_CORRIGEABLES = (
     "type_document", "numero", "date", "date_echeance", "devise",
-    "fournisseur", "lignes", "total_ht", "total_tva", "total_ttc", "taux_tva",
+    "fournisseur", "lignes", "total_ht", "total_tva", "total_ttc", "taux_tva", "structure_libre",
 )
 LONGUEUR_MAX_MOTIF = 1000
 LONGUEUR_MAX_NOM = 255
@@ -81,6 +82,19 @@ CREATE TABLE IF NOT EXISTS idp_evenements (
     cree_le     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_idp_evenements_document ON idp_evenements (document_id, id);
+-- Registre des champs découverts par l'IA dans des documents VALIDÉS : réutilisés ensuite comme
+-- vocabulaire connu de l'entreprise (la structure de données évolue avec les documents).
+CREATE TABLE IF NOT EXISTS idp_champs_personnalises (
+    cle                  TEXT PRIMARY KEY,
+    libelle              TEXT NOT NULL,
+    type                 TEXT NOT NULL,
+    section              TEXT,
+    module               TEXT,
+    nature_document      TEXT,
+    occurrences          INTEGER NOT NULL DEFAULT 1,
+    cree_le              TIMESTAMPTZ NOT NULL DEFAULT now(),
+    derniere_utilisation TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 """
 
 # Pools déjà initialisés (un pool = une base entreprise, réutilisé).
@@ -367,6 +381,10 @@ def corriger(pool, document_id: int, corrections: dict, acteur: str | None = Non
         for champ, valeur in corrections.items():
             if champ == "fournisseur" and isinstance(valeur, dict):
                 donnees["fournisseur"] = {**(donnees.get("fournisseur") or {}), **valeur}
+            elif champ == "structure_libre":
+                # ValueError (structure invalide) -> 422 côté route ; la preuve des champs intacts est conservée.
+                donnees["structure_libre"] = idp_structure_libre.fusionner_correction(
+                    donnees.get("structure_libre"), valeur, _champs_connus(cur)) if valeur else None
             else:
                 donnees[champ] = valeur
         anomalies = [a.vers_dict() for a in verifier_document(donnees)]
@@ -407,7 +425,58 @@ def valider(pool, document_id: int, acteur: str | None = None) -> dict:
                 raise ValidationBloquee("Ce document vient d'être validé par ailleurs.") from exc
             raise
         _evenement(cur, document_id, "validation", acteur)
-    return {"id": document_id, "statut": "valide"}
+        nouveaux = enregistrer_champs_personnalises(cur, document["donnees"])
+        if nouveaux:
+            _evenement(cur, document_id, "champs_personnalises", acteur, {"champs": nouveaux})
+    resultat = {"id": document_id, "statut": "valide"}
+    if nouveaux:
+        resultat["champs_personnalises"] = nouveaux
+    return resultat
+
+
+def _champs_connus(cur) -> set[str]:
+    cur.execute("SELECT cle FROM idp_champs_personnalises")
+    return {ligne[0] for ligne in cur.fetchall()}
+
+
+def enregistrer_champs_personnalises(cur, donnees: dict | None) -> list[str]:
+    """Verse au registre les champs nouveaux (et non invérifiables) d'un document validé."""
+    lignes = idp_structure_libre.champs_a_enregistrer((donnees or {}).get("structure_libre"))
+    for champ in lignes:
+        cur.execute(
+            "INSERT INTO idp_champs_personnalises (cle, libelle, type, section, module, nature_document) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (cle) DO UPDATE SET occurrences = idp_champs_personnalises.occurrences + 1, "
+            "derniere_utilisation = now()",
+            (champ["cle"], champ["libelle"], champ["type"], champ["section"], champ["module"],
+             champ["nature_document"]),
+        )
+    return [champ["cle"] for champ in lignes]
+
+
+def lister_champs_personnalises(pool) -> list[dict]:
+    initialiser_schema(pool)
+    with _transaction(pool) as cur:
+        cur.execute("SELECT cle, libelle, type, section, module, nature_document, occurrences, derniere_utilisation "
+                    "FROM idp_champs_personnalises ORDER BY occurrences DESC, cle LIMIT 500")
+        colonnes = ("cle", "libelle", "type", "section", "module", "nature_document", "occurrences",
+                    "derniere_utilisation")
+        resultat = []
+        for ligne in cur.fetchall():
+            element = dict(zip(colonnes, ligne))
+            element["derniere_utilisation"] = element["derniere_utilisation"].isoformat()
+            resultat.append(element)
+        return resultat
+
+
+def noms_champs_personnalises(pool) -> set[str]:
+    """Vocabulaire connu de l'entreprise (vide en cas de problème : l'analyse ne doit jamais en dépendre)."""
+    try:
+        initialiser_schema(pool)
+        with _transaction(pool) as cur:
+            return _champs_connus(cur)
+    except Exception:
+        return set()
 
 
 def rejeter(pool, document_id: int, motif: str, acteur: str | None = None) -> dict:

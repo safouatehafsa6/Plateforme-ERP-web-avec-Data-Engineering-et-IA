@@ -139,7 +139,8 @@ class TestRoutesProtegeesParLeJeton(Base):
             rep = self.client.post("/api/entreprises/activer-essai",
                                    json={"entrepriseId": 5}, headers=self.entetes(5))
         self.assertEqual(rep.status_code, 200, rep.text)
-        activer.assert_called_once_with(5)
+        # Le 2e argument est l'e-mail de l'acteur (historique de statut) : None pour un simple jeton d'inscription.
+        activer.assert_called_once_with(5, None)
 
     def test_confirmer_paiement_jamais_accessible_avec_le_seul_jeton(self):
         with patch.object(entreprises, "_activer_entreprise") as activer:

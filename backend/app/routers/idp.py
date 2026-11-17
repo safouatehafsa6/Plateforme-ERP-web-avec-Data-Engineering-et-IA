@@ -54,7 +54,7 @@ _MESSAGES_MODELE = {
 
 _acces = exiger_permission("documents", "creer")
 
-_EXTENSIONS_TELECHARGEMENT = {"pdf", "docx", "xlsx", "pptx", "csv", "xml", "json", "txt"}
+_EXTENSIONS_TELECHARGEMENT = {"pdf", "docx", "xlsx", "ods", "pptx", "csv", "xml", "json", "txt"}
 
 
 def utilisateur_idp(utilisateur: dict = Depends(_acces)) -> dict:

@@ -3,7 +3,7 @@
 Entrée  : les octets d'un fichier + son nom.
 Sortie  : un `DocumentLu` (texte brut + tableaux) quel que soit le format :
           PDF (texte ou numérisé), images, Word, Excel, CSV, PowerPoint,
-          XML, JSON, texte.
+          XML, JSON, ODS (tableur OpenDocument), texte.
 
 Principes de sécurité :
 - le format est déterminé par le CONTENU (signature du fichier), jamais par
@@ -126,7 +126,14 @@ def detecter_format(contenu: bytes, nom_fichier: str = "") -> str:
             return "xlsx"
         if "ppt/presentation.xml" in noms:
             return "pptx"
-        raise FormatNonSupporte("Archive non reconnue : seuls Word, Excel et PowerPoint (.docx, .xlsx, .pptx) sont acceptés.")
+        if "mimetype" in noms:
+            try:
+                mimetype = _verifier_zip(contenu).read("mimetype").decode("ascii", errors="ignore").strip()
+            except (KeyError, UnicodeDecodeError, zipfile.BadZipFile):
+                mimetype = ""
+            if mimetype == "application/vnd.oasis.opendocument.spreadsheet" and "content.xml" in noms:
+                return "ods"
+        raise FormatNonSupporte("Archive non reconnue : formats acceptés : Word, Excel, PowerPoint et tableur ODS (.docx, .xlsx, .pptx, .ods).")
 
     # Formats texte : l'extension sert d'indice, le contenu tranche.
     if b"\x00" in contenu[:2048] and not contenu.startswith((b"\xff\xfe", b"\xfe\xff")):
@@ -307,6 +314,91 @@ def _lire_xlsx(contenu: bytes) -> DocumentLu:
     return doc
 
 
+def _nom_balise_xml(balise: str) -> str:
+    return balise.rsplit("}", 1)[-1]
+
+
+def _texte_ods_cellule(cellule) -> str:
+    """Récupère le texte affiché ou la valeur typée d'une cellule OpenDocument."""
+    paragraphes = []
+    for element in cellule.iter():
+        if _nom_balise_xml(element.tag) == "p":
+            texte = "".join(element.itertext()).strip()
+            if texte:
+                paragraphes.append(texte)
+    if paragraphes:
+        return " ".join(paragraphes)
+
+    # Les cellules numériques, dates et booléennes peuvent stocker leur valeur
+    # dans les attributs XML sans élément text:p.
+    attributs = {_nom_balise_xml(k): v for k, v in cellule.attrib.items()}
+    for cle in ("date-value", "time-value", "boolean-value", "string-value", "value"):
+        if attributs.get(cle) is not None:
+            return str(attributs[cle]).strip()
+    return ""
+
+
+def _lire_ods(contenu: bytes) -> DocumentLu:
+    """Lit les feuilles d'un ODS avec XML durci et limites de répétition."""
+    from defusedxml import ElementTree
+    from defusedxml.common import DefusedXmlException
+
+    try:
+        archive = _verifier_zip(contenu)
+        xml = archive.read("content.xml")
+        racine = ElementTree.fromstring(xml)
+    except (KeyError, zipfile.BadZipFile) as exc:
+        raise DocumentIllisible("Classeur ODS corrompu ou incomplet.") from exc
+    except DefusedXmlException as exc:
+        raise DocumentIllisible("Classeur ODS refusé : entités ou DTD externes interdites.") from exc
+    except ElementTree.ParseError as exc:
+        raise DocumentIllisible("Contenu XML du classeur ODS invalide.") from exc
+
+    doc = DocumentLu(format="ods")
+    textes = []
+    nb_lignes_total = 0
+    for table in (e for e in racine.iter() if _nom_balise_xml(e.tag) == "table"):
+        nom_feuille = next((v for k, v in table.attrib.items() if _nom_balise_xml(k) == "name"), "Feuille")
+        rangees = []
+        for ligne in (e for e in table.iter() if _nom_balise_xml(e.tag) == "table-row"):
+            repetitions_ligne = next((v for k, v in ligne.attrib.items() if _nom_balise_xml(k) == "number-rows-repeated"), "1")
+            try:
+                repetitions_ligne = max(1, min(int(repetitions_ligne), MAX_LIGNES_TABLEUR - nb_lignes_total))
+            except (TypeError, ValueError):
+                repetitions_ligne = 1
+            cellules = []
+            for cellule in ligne:
+                type_cellule = _nom_balise_xml(cellule.tag)
+                if type_cellule not in ("table-cell", "covered-table-cell"):
+                    continue
+                valeur = _texte_ods_cellule(cellule)
+                repetitions_colonne = next((v for k, v in cellule.attrib.items() if _nom_balise_xml(k) == "number-columns-repeated"), "1")
+                try:
+                    repetitions_colonne = max(1, min(int(repetitions_colonne), 256 - len(cellules)))
+                except (TypeError, ValueError):
+                    repetitions_colonne = 1
+                cellules.extend([valeur] * repetitions_colonne)
+                if len(cellules) >= 256:
+                    cellules = cellules[:256]
+                    doc.avertissements.append("Certaines colonnes ODS ont été limitées à 256 cellules par ligne.")
+                    break
+            if any(cellules):
+                repetitions_reelles = min(repetitions_ligne, MAX_LIGNES_TABLEUR - nb_lignes_total)
+                rangees.extend([cellules.copy() for _ in range(repetitions_reelles)])
+                nb_lignes_total += repetitions_reelles
+            if nb_lignes_total >= MAX_LIGNES_TABLEUR:
+                doc.avertissements.append(f"Classeur ODS tronqué à {MAX_LIGNES_TABLEUR} lignes.")
+                break
+        if rangees:
+            doc.tableaux.append(rangees)
+            textes.append(f"## Feuille : {nom_feuille}")
+            textes.extend(" | ".join(r) for r in rangees)
+        if nb_lignes_total >= MAX_LIGNES_TABLEUR:
+            break
+    doc.texte = "\n".join(textes)
+    return doc
+
+
 def _lire_csv(contenu: bytes) -> DocumentLu:
     texte = decoder_texte(contenu)
     echantillon = texte[:4096]
@@ -406,7 +498,7 @@ def _lire_txt(contenu: bytes) -> DocumentLu:
 
 _LECTEURS = {
     "pdf": _lire_pdf, "image": _lire_image, "docx": _lire_docx, "xlsx": _lire_xlsx,
-    "csv": _lire_csv, "pptx": _lire_pptx, "xml": _lire_xml, "json": _lire_json, "txt": _lire_txt,
+    "csv": _lire_csv, "ods": _lire_ods, "pptx": _lire_pptx, "xml": _lire_xml, "json": _lire_json, "txt": _lire_txt,
 }
 
 

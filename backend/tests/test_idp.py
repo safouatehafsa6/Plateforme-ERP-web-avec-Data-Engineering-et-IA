@@ -8,6 +8,7 @@ import io
 import json
 import shutil
 import unittest
+import zipfile
 from datetime import date
 from decimal import Decimal
 from unittest import mock
@@ -55,6 +56,56 @@ class TestConversions(unittest.TestCase):
             self.assertEqual(convertir_date(texte), date(2026, 10, 12), texte)
         self.assertIsNone(convertir_date("pas une date"))
         self.assertIsNone(convertir_date(None))
+
+
+class TestExtractionODS(unittest.TestCase):
+    def _ods(self, content_xml, mimetype="application/vnd.oasis.opendocument.spreadsheet"):
+        tampon = io.BytesIO()
+        with zipfile.ZipFile(tampon, "w") as archive:
+            archive.writestr("mimetype", mimetype, compress_type=zipfile.ZIP_STORED)
+            archive.writestr("content.xml", content_xml)
+        return tampon.getvalue()
+
+    def test_ods_extrait_les_cellules_et_valeurs_numeriques(self):
+        xml = '''<?xml version="1.0" encoding="UTF-8"?>
+        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+          xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+          xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+          <office:body><office:spreadsheet><table:table table:name="Achats">
+            <table:table-row>
+              <table:table-cell office:value-type="string"><text:p>Article</text:p></table:table-cell>
+              <table:table-cell office:value-type="string"><text:p>Quantité</text:p></table:table-cell>
+              <table:table-cell office:value-type="string"><text:p>Prix</text:p></table:table-cell>
+            </table:table-row>
+            <table:table-row>
+              <table:table-cell office:value-type="string"><text:p>Papier A4</text:p></table:table-cell>
+              <table:table-cell office:value-type="float" office:value="12"/>
+              <table:table-cell office:value-type="float" office:value="25.5"/>
+            </table:table-row>
+          </table:table></office:spreadsheet></office:body>
+        </office:document-content>'''.encode("utf-8")
+        contenu = self._ods(xml)
+        doc = ext.lire_document(contenu, "inventaire.ods")
+        self.assertEqual(doc.format, "ods")
+        self.assertIn("Feuille : Achats", doc.texte)
+        self.assertEqual(doc.tableaux[0][1], ["Papier A4", "12", "25.5"])
+
+    def test_ods_detecte_par_mimetype_et_non_par_extension(self):
+        xml = '''<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"/>'''.encode("utf-8")
+        contenu = self._ods(xml)
+        self.assertEqual(ext.detecter_format(contenu, "fichier.bin"), "ods")
+
+    def test_archive_zip_non_ods_reste_refusee(self):
+        contenu = self._ods(b"<root/>", mimetype="application/zip")
+        with self.assertRaises(ext.FormatNonSupporte):
+            ext.detecter_format(contenu, "fichier.ods")
+
+    def test_ods_refuse_entites_externes(self):
+        xml = (b'''<?xml version="1.0"?><!DOCTYPE office:document-content [<!ENTITY x SYSTEM "file:///etc/passwd">]>
+        <office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0">&x;</office:document-content>''')
+        contenu = self._ods(xml)
+        with self.assertRaises(ext.DocumentIllisible):
+            ext.lire_document(contenu, "piege.ods")
 
 
 class TestControles(unittest.TestCase):

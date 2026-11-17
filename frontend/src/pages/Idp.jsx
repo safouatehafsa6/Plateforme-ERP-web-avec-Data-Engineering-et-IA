@@ -11,7 +11,7 @@ import {
 } from "../api/idpApi";
 import "./idp.css";
 
-const ACCEPT = ".pdf,.docx,.xlsx,.pptx,.csv,.xml,.json,.txt,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.gif";
+const ACCEPT = ".pdf,.docx,.xlsx,.ods,.pptx,.csv,.xml,.json,.txt,.jpg,.jpeg,.png,.tif,.tiff,.bmp,.gif";
 const MODULES = {
   documents: "Documents", ressources_humaines: "Ressources humaines", achats: "Achats", ventes: "Ventes",
   comptabilite_fiscalite: "Comptabilité et fiscalité", projets: "Gestion de projets",
@@ -232,7 +232,7 @@ export default function Idp() {
             </button>
             <input ref={entree} type="file" accept={ACCEPT} hidden onChange={(e) => deposer(e.target.files?.[0])} />
             {occupe && <small role="status">L'IA lit le document, puis découvre ses champs : cela peut prendre une à plusieurs minutes avec un modèle local. Ne fermez pas la page.</small>}
-            <small>PDF (numérique ou scanné), Word, Excel, PowerPoint, images JPG/PNG/TIFF, CSV, XML, JSON, texte · 20 Mo maximum.</small>
+            <small>PDF (numérique ou scanné), Word, Excel (XLSX/ODS), PowerPoint, images JPG/PNG/TIFF, CSV, XML, JSON, texte · 20 Mo maximum.</small>
           </div>
 
           <div className="idp-grille">

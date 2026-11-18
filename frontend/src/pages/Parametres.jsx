@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Settings, Palette, Languages, ToggleLeft, ToggleRight } from "lucide-react";
+import { Settings, Palette, Languages, ToggleLeft, ToggleRight, Database } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
 import { useLangue } from "../context/LangueContext";
 
@@ -63,6 +64,12 @@ export default function Parametres() {
             </select>
           </label>
         </div>
+      </section>
+
+      <section className="panel parametres-section">
+        <div className="parametres-section__title"><Database size={20} /><h2>Données et sécurité</h2></div>
+        <p className="parametres-muted">Importer ou exporter les données métier et gérer les sauvegardes chiffrées.</p>
+        <Link to="/transferts" className="app-header__bouton app-header__bouton--primaire">Ouvrir Importation / Exportation / Sécurité</Link>
       </section>
 
       <section className="panel parametres-section">

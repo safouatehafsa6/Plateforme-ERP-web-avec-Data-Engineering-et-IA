@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from decimal import Decimal
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import utilisateur_connecte
+from app.services import llm_client, assistant_text
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
@@ -34,6 +35,12 @@ class AssistantMessage(BaseModel):
     langue: str = Field(default="fr", pattern="^(fr|en|ar)$")
     module: str = Field(default="dashboard", max_length=100)
     state: AssistantState = Field(default_factory=AssistantState)
+
+
+class ReformulationRequest(BaseModel):
+    texte: str = Field(min_length=1, max_length=8000)
+    langue: str = Field(default="fr", pattern="^(fr|en|ar)$")
+    mode: str = Field(default="correction", pattern="^(correction|reformulation)$")
 
 
 def _fmt(value):
@@ -1482,7 +1489,7 @@ def _est_conversation(message):
     if not texte or len(texte) > 60:
         return False
     try:
-        from app.services import llm_client
+        from app.services import llm_client, assistant_text
         reponse = llm_client.chat_completion(
             [
                 {"role": "system", "content": (
@@ -1510,7 +1517,7 @@ def _termes_de_recherche(question):
     if len((question or "").strip()) < 8:
         return ""
     try:
-        from app.services import llm_client
+        from app.services import llm_client, assistant_text
         texte = llm_client.chat_completion(
             [
                 {"role": "system", "content": (
@@ -1821,6 +1828,32 @@ def _rechercher_chunks_rag(utilisateur, question, limite=5):
 def _reponse_rag(sources, langue):
     from app.services.rag_response import reponse_rag_concise
     return reponse_rag_concise(sources, langue)
+
+
+@router.post("/reformuler")
+def reformuler_texte(
+    requete: ReformulationRequest,
+    utilisateur: dict = Depends(utilisateur_connecte),
+):
+    """Correction/reformulation de texte, sans accès ni écriture dans les données ERP."""
+    if not utilisateur:
+        raise HTTPException(401, "Authentification requise.")
+    try:
+        resultat = llm_client.chat_completion(
+            [
+                {"role": "system", "content": assistant_text.consigne_reformulation(requete.langue, requete.mode)},
+                {"role": "user", "content": requete.texte},
+            ],
+            temperature=0.1,
+            timeout=120,
+        )
+    except llm_client.LLMError as exc:
+        if exc.kind == "unconfigured":
+            raise HTTPException(503, "Le moteur IA local n'est pas configuré.") from exc
+        if exc.kind in {"unreachable", "timeout", "cooldown"}:
+            raise HTTPException(503, "Le moteur IA est momentanément indisponible.") from exc
+        raise HTTPException(502, "Le moteur IA n'a pas pu traiter ce texte.") from exc
+    return {"texte": resultat[:8000], "mode": requete.mode, "langue": requete.langue}
 
 
 @router.post("/chat")

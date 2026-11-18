@@ -1,5 +1,6 @@
 import os
 import bcrypt
+from app.security.crypto import verifier_et_migrer, hacher_mot_de_passe
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
@@ -155,7 +156,7 @@ async def login(payload: LoginPayload, request: Request):
     if ligne_super_admin:
         utilisateur_id, nom, email_bd, hash_stocke = ligne_super_admin
         mot_de_passe_valide = await run_in_threadpool(
-            bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+            verifier_et_migrer, pool_central, "super_admin", utilisateur_id, payload.motDePasse, hash_stocke)
 
         if not mot_de_passe_valide:
             journaliser("connexion_echouee", gravite="avertissement", succes=False,
@@ -220,7 +221,7 @@ async def login(payload: LoginPayload, request: Request):
             if ligne_externe:
                 utilisateur_id, hash_stocke, actif, client_id, client_nom = ligne_externe
                 mot_de_passe_valide = actif and await run_in_threadpool(
-                    bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+                    verifier_et_migrer, pool_tenant, "utilisateur_externe", utilisateur_id, payload.motDePasse, hash_stocke)
 
                 if mot_de_passe_valide:
                     refus = _refus_si_abonnement_suspendu(entreprise_id, "externe", email, request)
@@ -266,7 +267,7 @@ async def login(payload: LoginPayload, request: Request):
             if ligne_utilisateur:
                 utilisateur_id, nom, prenom, hash_stocke, actif, role_nom = ligne_utilisateur
                 mot_de_passe_valide = actif and await run_in_threadpool(
-                    bcrypt.checkpw, payload.motDePasse.encode("utf-8"), hash_stocke.encode("utf-8"))
+                    verifier_et_migrer, pool_tenant, "utilisateur", utilisateur_id, payload.motDePasse, hash_stocke)
 
                 if mot_de_passe_valide:
                     refus = _refus_si_abonnement_suspendu(entreprise_id, "interne", email, request)
@@ -460,7 +461,7 @@ def reinitialiser_mot_de_passe(payload: ReinitialiserMotDePassePayload):
             "message": "Session de réinitialisation invalide ou expirée. Recommencez la procédure.",
         })
 
-    nouveau_hash = bcrypt.hashpw(payload.nouveauMotDePasse.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    nouveau_hash = hacher_mot_de_passe(payload.nouveauMotDePasse)
     conn = pool_central.getconn()
     try:
         with conn.cursor() as cur:

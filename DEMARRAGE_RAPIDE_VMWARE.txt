@@ -1,0 +1,28 @@
+VERSION ERP — OCR / DICTÉE / REFORMULATION / MOBILE
+
+1. Décompresser le projet.
+2. Conserver le fichier .env livré avec cette archive ; ne pas le remplacer par .env.example.
+3. Ouvrir un terminal à la racine du projet.
+4. Vérifier la configuration : docker compose config
+5. Construire et démarrer : docker compose up -d --build
+6. Vérifier les services : docker compose ps
+7. Ouvrir l'application : http://localhost:3000
+
+Le backend Docker installe Tesseract et les langues fra/ara/eng.
+Le modèle IA attendu est Ollama avec qwen2.5:3b.
+Pour le cas où Docker tourne dans VMware et Ollama sur Windows hôte,
+lire docs/DEPLOIEMENT_VMWARE_OCR_DICTEE.md avant le démarrage.
+
+Tests réalisés lors de la préparation :
+- Backend IDP + reformulation : 41 tests réussis.
+- Frontend Node : 42 tests réussis.
+- Syntaxe Python : 134 fichiers vérifiés.
+- Fichiers Compose : YAML valide.
+
+Le build Vite de production n'a pas pu être confirmé dans l'environnement
+de préparation car les dépendances npm n'étaient pas installées.
+Exécuter npm ci puis npm run build dans frontend sur la machine de développement.
+
+Le répertoire .git n'est pas inclus : l'archive source reçue contenait un état
+de rebase Git en cours. Les fichiers source et configurations sont conservés.
+Le fichier .env est conservé sans modification ; ne jamais le pousser sur GitHub.

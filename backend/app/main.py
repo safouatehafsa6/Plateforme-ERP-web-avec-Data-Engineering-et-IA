@@ -6,7 +6,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, appareils, sessions, suggestions, notifications, support, public, calculs, room_live, room_live_recordings, prospects, idp, outils, boutons_flottants
+from app.routers import auth, entreprises, admin, utilisateurs, roles, utilisateurs_externes, portail, verification, ventes, achats, fournisseurs, clients, stock, comptabilite, assistant, assistant_documents, pipeline, appareils, sessions, suggestions, notifications, support, public, calculs, room_live, room_live_recordings, prospects, idp, outils, boutons_flottants, transferts, securite
 from app.db import pool_central
 from app.security.appareils import AppareilRefuse, assurer_schema as assurer_schema_appareils
 from app.security.tentatives import assurer_schema as assurer_schema_tentatives
@@ -82,6 +82,8 @@ app.include_router(public.router)
 app.include_router(calculs.router)
 app.include_router(idp.router)
 app.include_router(outils.router)
+app.include_router(transferts.router)
+app.include_router(securite.router)
 app.include_router(room_live.router)
 app.include_router(room_live_recordings.router)
 app.include_router(boutons_flottants.router)

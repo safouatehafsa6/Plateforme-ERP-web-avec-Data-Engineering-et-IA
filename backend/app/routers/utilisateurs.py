@@ -8,10 +8,10 @@ connexion").
 """
 
 import secrets
-import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.security.crypto import hacher_mot_de_passe
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import exiger_role_admin
 from app.services.provisioning import indexer_compte_central, email_disponible_pour
@@ -92,7 +92,7 @@ def creer_utilisateur(payload: NouvelUtilisateurPayload, utilisateur=Depends(exi
         raise HTTPException(status_code=409, detail="Un compte existe déjà avec cet email.")
 
     mot_de_passe_temporaire = secrets.token_urlsafe(9)
-    mot_de_passe_hash = bcrypt.hashpw(mot_de_passe_temporaire.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    mot_de_passe_hash = hacher_mot_de_passe(mot_de_passe_temporaire)
 
     conn = pool_tenant.getconn()
     try:

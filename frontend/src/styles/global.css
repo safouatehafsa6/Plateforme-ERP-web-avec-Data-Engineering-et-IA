@@ -2398,3 +2398,22 @@ a {
 .assistant-panel__voice button:hover:not(:disabled), .assistant-panel__voice button[aria-pressed="true"] { border-color:var(--brass); background:color-mix(in srgb, var(--brass) 12%, var(--carte-fond)); }
 .assistant-panel__voice button:disabled { opacity:.45; cursor:not-allowed; }
 .assistant-panel__voice-status { margin:0; padding:.35rem .75rem; color:var(--text-muted); background:var(--paper); font-size:.7rem; }
+
+
+/* Dictée, correction IA et confort tactile sur smartphone. */
+@media (max-width: 768px) {
+  .assistant-panel, .assistant-panel--rtl {
+    position: fixed; inset-inline: 8px; bottom: max(8px, env(safe-area-inset-bottom));
+    width: auto; height: min(78dvh, 680px); max-height: calc(100dvh - 16px);
+    border-radius: 14px;
+  }
+  .assistant-panel__voice { gap: .4rem; }
+  .assistant-panel__voice button { min-height: 42px; flex: 1 1 calc(50% - .4rem); font-size: .75rem; }
+  .assistant-panel__form button { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 420px) {
+  .assistant-panel__header { padding: .6rem; }
+  .assistant-panel__titre small { max-width: 150px; }
+  .assistant-panel__voice button { flex-basis: 100%; justify-content: flex-start; }
+  .assistant-panel__messages { padding: .6rem; }
+}

@@ -164,13 +164,48 @@ def detecter_format(contenu: bytes, nom_fichier: str = "") -> str:
 # OCR
 # --------------------------------------------------------------------------
 
+def _langues_ocr_disponibles(pytesseract) -> str:
+    """N'active que les packs réellement installés dans l'image Docker."""
+    try:
+        disponibles = set(pytesseract.get_languages(config=""))
+    except Exception:
+        disponibles = {"eng"}
+    choisies = [langue for langue in ("fra", "ara", "eng") if langue in disponibles]
+    return "+".join(choisies) or "eng"
+
+
+def _preparer_image_ocr(image):
+    """Améliore le contraste et la résolution sans modifier le fichier original."""
+    from PIL import Image, ImageOps, ImageFilter
+
+    image = ImageOps.exif_transpose(image).convert("L")
+    image = ImageOps.autocontrast(image)
+    # Tesseract lit mieux les petits caractères lorsque la largeur est suffisante.
+    if image.width < 1600:
+        facteur = min(2.0, 1600 / max(image.width, 1))
+        image = image.resize(
+            (int(image.width * facteur), int(image.height * facteur)),
+            Image.Resampling.LANCZOS,
+        )
+    image = image.filter(ImageFilter.SHARPEN)
+    return image
+
+
 def _ocr_image(image) -> str:
     import pytesseract
-    try:
-        return pytesseract.image_to_string(image, lang=LANGUES_OCR)
-    except pytesseract.TesseractError:
-        # Une langue (ex. arabe) n'est pas installée : on retente avec l'anglais.
-        return pytesseract.image_to_string(image, lang="eng")
+
+    preparee = _preparer_image_ocr(image)
+    langues = _langues_ocr_disponibles(pytesseract)
+    # Les modes 6 et 11 couvrent respectivement les blocs de texte et les
+    # documents à mise en page libre. On conserve le résultat le plus fourni.
+    resultats = []
+    for psm in (6, 11):
+        texte = pytesseract.image_to_string(
+            preparee, lang=langues, config=f"--oem 1 --psm {psm}"
+        ).strip()
+        if texte:
+            resultats.append(texte)
+    return max(resultats, key=len) if resultats else ""
 
 
 def _ocr_disponible() -> bool:

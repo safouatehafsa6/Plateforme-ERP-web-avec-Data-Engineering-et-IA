@@ -32,6 +32,7 @@ import Contact from "./pages/Contact";
 import Calculs from "./pages/Calculs";
 import RoomLive from "./pages/RoomLive";
 import Idp from "./pages/Idp";
+import Transferts from "./pages/Transferts";
 
 // Le Header est rendu une seule fois ici, en dehors des <Routes> :
 // il reste donc affiché en continu quelle que soit la page consultée,
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="/clients" element={<Clients />} />
             <Route path="/stock" element={<Stock />} />
             <Route path="/parametres" element={<Parametres />} />
+            <Route path="/transferts" element={<Transferts />} />
             <Route path="/facturation" element={<Facturation />} />
             <Route path="/comptabilite" element={<Comptabilite />} />
             <Route path="/admin/abonnements" element={<AdminAbonnements />} />

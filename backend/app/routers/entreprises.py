@@ -3,7 +3,6 @@ import os
 import re
 import secrets
 import unicodedata
-import bcrypt
 import jwt
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -11,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 
+from app.security.crypto import hacher_mot_de_passe
 from app.db import pool_central
 from app.security.jwt_utils import exiger_super_admin, obtenir_utilisateur_courant
 from app.security.captcha import generer_captcha
@@ -255,7 +255,7 @@ def inscription(payload: InscriptionPayload):
     finally:
         pool_central.putconn(conn)
 
-    mot_de_passe_hash = bcrypt.hashpw(payload.motDePasse.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    mot_de_passe_hash = hacher_mot_de_passe(payload.motDePasse)
     stocker_admin_temporaire(entreprise_id, payload.nomAdmin, email, mot_de_passe_hash)
 
     code_otp = generer_et_stocker_otp(entreprise_id)

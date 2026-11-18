@@ -23,3 +23,12 @@ pypdfium2==4.30.0
 openpyxl==3.1.5
 python-pptx==1.0.2
 defusedxml==0.7.1
+
+# Import/export avancé et sécurité cryptographique
+argon2-cffi==23.1.0
+cryptography==43.0.1
+PyYAML==6.0.2
+odfpy==1.4.1
+dbf==0.99.10
+dbfread==2.0.7
+boto3==1.35.24

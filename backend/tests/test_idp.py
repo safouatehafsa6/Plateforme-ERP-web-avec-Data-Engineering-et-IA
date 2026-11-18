@@ -108,6 +108,25 @@ class TestExtractionODS(unittest.TestCase):
             ext.lire_document(contenu, "piege.ods")
 
 
+class TestAmeliorationOCR(unittest.TestCase):
+    def test_langues_ocr_limitees_aux_packs_installes(self):
+        moteur = mock.Mock()
+        moteur.get_languages.return_value = ["eng", "fra"]
+        self.assertEqual(ext._langues_ocr_disponibles(moteur), "fra+eng")
+
+    def test_langue_ocr_anglaise_en_dernier_recours(self):
+        moteur = mock.Mock()
+        moteur.get_languages.return_value = []
+        self.assertEqual(ext._langues_ocr_disponibles(moteur), "eng")
+
+    def test_pretraitement_ocr_convertit_en_niveaux_de_gris(self):
+        from PIL import Image
+        image = Image.new("RGB", (400, 200), "white")
+        preparee = ext._preparer_image_ocr(image)
+        self.assertEqual(preparee.mode, "L")
+        self.assertGreaterEqual(preparee.width, 800)
+
+
 class TestControles(unittest.TestCase):
     def verifier(self, donnees):
         return verifier_document(donnees, aujourdhui=AUJOURDHUI)

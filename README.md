@@ -326,3 +326,29 @@ Le projet distribué ne contient pas le fichier local `.env`, le répertoire `.g
 - Les tests unitaires backend de validation du payload passent (7 tests).
 - Les tests frontend de validation et de suggestion sont présents dans `frontend/tests/clientValidation.test.js`.
 - Le build Vite n'a pas pu être confirmé dans cet environnement, car l'installation des dépendances npm n'a pas abouti. Un build et des essais fonctionnels dans l'environnement Docker du projet restent nécessaires avant de considérer ces évolutions comme validées en intégration.
+
+
+## Évolutions OCR, dictée et interface mobile
+
+- OCR renforcé pour les PDF numérisés et images : normalisation du contraste, amélioration de la netteté, agrandissement des petits caractères et comparaison de deux modes de segmentation Tesseract.
+- Détection des packs de langue installés ; priorité au français, à l'arabe et à l'anglais lorsqu'ils sont disponibles.
+- Dictée vocale directement dans les champs texte du module IDP, avec choix FR/AR/EN.
+- Correction orthographique et reformulation par le modèle local configuré ; une proposition est affichée et doit être appliquée explicitement par l'utilisateur.
+- Mise en page IDP et assistant adaptée aux smartphones et tablettes.
+- Les workflows existants d'assistance et d'intégration IDP vers Achats sont conservés : extraction, rapprochement fournisseur/produits et confirmation humaine avant création métier.
+
+Voir `docs/DEPLOIEMENT_VMWARE_OCR_DICTEE.md` pour la configuration VMware, Docker et Ollama.
+
+
+## Importation / exportation et sécurité renforcée
+
+Le module d'échange de données et de sauvegarde est documenté dans
+[`docs/IMPORT_EXPORT_SECURITE.md`](docs/IMPORT_EXPORT_SECURITE.md).
+
+- Interface : `/transferts` (également accessible depuis Paramètres).
+- API d'import/export : `/api/transferts`.
+- Sauvegardes chiffrées et restauration : `/api/securite/sauvegardes`.
+- Les clés `ERP_ENCRYPTION_KEY` et `ERP_HMAC_KEY` doivent être générées séparément et injectées via un gestionnaire de secrets.
+- Pour activer TLS PostgreSQL dans l'environnement Docker de test, suivre les instructions du guide et utiliser `docker-compose.tls.yml`.
+
+Important : conserver le fichier `.env` local existant lors de la mise à jour du projet. L'archive de livraison ne contient pas ce fichier sensible ; elle fournit uniquement `.env.example`.

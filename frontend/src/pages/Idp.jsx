@@ -4,6 +4,7 @@ import {
   UploadCloud, FileText, CheckCircle2, XCircle, AlertTriangle, Download, Save, Sparkles, Plus, ScanText, Database, ShoppingCart,
 } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import DictationInput from "../components/DictationInput";
 import { lireSession, estAdminEntreprise } from "../api/session";
 import {
   deposerDocument, listerDocuments, detailDocument, corrigerDocument, validerDocument, rejeterDocument,
@@ -285,8 +286,8 @@ export default function Idp() {
 
                   <h3>Informations standard</h3>
                   <div className="idp-champs">
-                    <label className="idp-champ"><span>Fournisseur / émetteur</span>
-                      <input value={fournisseur} disabled={!editable} onChange={(e) => { setFournisseur(e.target.value); setModifie(true); }} /></label>
+                    <div className="idp-champ"><span>Fournisseur / émetteur</span>
+                      <DictationInput value={fournisseur} disabled={!editable} onChange={(v) => { setFournisseur(v); setModifie(true); }} /></div>
                     {CHAMPS_STANDARD.map(([cle, libelle]) => (
                       <label key={cle} className="idp-champ"><span>{libelle}</span>
                         <input value={standard[cle] ?? ""} disabled={!editable} onChange={(e) => modifierStandard(cle, e.target.value)} /></label>
@@ -311,15 +312,17 @@ export default function Idp() {
                           {section.champs.map((champ, iC) => {
                             const verif = VERIF[champ.verification] || VERIF.corrige;
                             return (
-                              <label key={champ.cle} className="idp-champ">
+                              <div key={champ.cle} className="idp-champ">
                                 <span>
                                   {champ.libelle}
                                   {champ.nouveau && <em className="idp-badge idp-badge--nouveau">Nouveau champ</em>}
                                   <em className={`idp-badge idp-badge--${verif.classe}`} title={champ.source ? `Extrait du document : « ${champ.source} »` : "Aucune source citée"}>{verif.texte}</em>
                                 </span>
-                                <input value={texteValeur(champ.valeur)} disabled={!editable} onChange={(e) => modifierChamp(iS, iC, e.target.value)} />
+                                {champ.type === "texte"
+                                  ? <DictationInput value={texteValeur(champ.valeur)} disabled={!editable} onChange={(v) => modifierChamp(iS, iC, v)} />
+                                  : <input value={texteValeur(champ.valeur)} disabled={!editable} onChange={(e) => modifierChamp(iS, iC, e.target.value)} />}
                                 <small className="idp-type">{champ.type}</small>
-                              </label>
+                              </div>
                             );
                           })}
                           {editable && <button type="button" className="bouton-mini" onClick={() => ajouterChamp(iS)}><Plus size={13} /> Ajouter un champ</button>}

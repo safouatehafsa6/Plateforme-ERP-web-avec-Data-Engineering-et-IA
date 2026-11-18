@@ -1,0 +1,25 @@
+MISE A JOUR DU PROJET ERP - IMPORT/EXPORT ET SECURITE
+Date : 18 novembre 2026
+
+CONTENU
+- Module d'import/export backend et page React accessible depuis Parametres.
+- Import/export CSV, XLSX, ODS, JSON, XML, YAML, SQLite, DBF et archives ZIP/TAR/GZ (CSV unique).
+- Export RTF/ODT.
+- Sauvegardes PostgreSQL pg_dump au format custom, chiffrement AES-256-GCM, signature HMAC-SHA-256, verification et restauration avec sauvegarde prealable automatique.
+- Hachage Argon2id des nouveaux mots de passe et migration progressive des empreintes bcrypt au login.
+- Adaptateur AWS KMS optionnel (non configure dans cet environnement).
+- Configuration TLS PostgreSQL optionnelle dans docker-compose.tls.yml.
+- Tests unitaires et guide docs/IMPORT_EXPORT_SECURITE.md.
+
+AVANT DE LANCER
+1. Conserver le fichier .env local existant : il n'est pas inclus dans cette archive afin de ne pas diffuser de secrets.
+2. Ne pas remplacer .env par .env.example. Ajouter dans le .env local les cles ERP_ENCRYPTION_KEY et ERP_HMAC_KEY (deux valeurs distinctes generees independamment), ainsi que ERP_BACKUP_DIR=/app/backups et ERP_KEY_PROVIDER=env.
+3. Reconstruire le backend pour installer les dependances Python et pg_dump/pg_restore : docker compose up -d --build.
+4. Consulter docs/IMPORT_EXPORT_SECURITE.md avant de tester les sauvegardes et la restauration.
+5. Tester d'abord sur une base de test. La restauration remplace les donnees de la base cible.
+
+LIMITES A VALIDER AVEC LE SUPERVISEUR
+- CDX n'est pas un fichier autonome de donnees : la generation d'index associes a DBF necessite le dialecte cible et les expressions d'index.
+- RTF/ODT sont exportes comme documents ; leur import tabulaire n'est pas active.
+- Le KMS AWS est optionnel et doit etre configure avec les identifiants et autorisations de l'entreprise.
+- Les tests PostgreSQL/pg_dump/pg_restore, l'activation TLS dans Docker et la construction frontend doivent etre executes dans l'environnement de la VM.

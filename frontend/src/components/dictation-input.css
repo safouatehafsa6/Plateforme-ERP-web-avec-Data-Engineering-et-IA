@@ -1,0 +1,15 @@
+.dictation-field{display:grid;gap:.35rem;min-width:0}
+.dictation-field__control{display:flex;align-items:stretch;gap:.3rem;min-width:0}
+.dictation-field__control>input,.dictation-field__control>textarea{flex:1;min-width:0;width:100%;padding:.5rem .6rem;border:1px solid #cbd5e1;border-radius:.55rem;background:var(--panel-bg,#fff);color:inherit;font:inherit}
+.dictation-field__control>textarea{min-height:5rem;resize:vertical}
+.dictation-field__tools{display:flex;align-items:center;gap:.2rem;flex-shrink:0}
+.dictation-field__tools button,.dictation-field__suggestion button,.dictation-field__tools select{display:inline-flex;align-items:center;justify-content:center;gap:.25rem;min-width:2rem;min-height:2rem;padding:.35rem;border:1px solid #cbd5e1;border-radius:.5rem;background:var(--panel-bg,#fff);color:inherit;cursor:pointer}
+.dictation-field__tools button:disabled{opacity:.45;cursor:not-allowed}
+.dictation-field__error{color:#b91c1c;font-size:.75rem}
+.dictation-field__suggestion{padding:.65rem;border:1px solid #c7d2fe;border-radius:.65rem;background:#eef2ff;color:#1e1b4b;font-size:.82rem}
+.dictation-field__suggestion p{white-space:pre-wrap;margin:.4rem 0}
+.dictation-field__suggestion>div{display:flex;gap:.4rem;flex-wrap:wrap}
+.dictation-field__suggestion button{min-height:1.8rem}
+.dictation-spin{animation:dictation-spin 1s linear infinite}
+@keyframes dictation-spin{to{transform:rotate(360deg)}}
+@media(max-width:560px){.dictation-field__control{flex-wrap:wrap}.dictation-field__control>input,.dictation-field__control>textarea{flex-basis:100%}.dictation-field__tools{width:100%;justify-content:flex-end}.dictation-field__tools button{min-width:2.5rem;min-height:2.5rem}}

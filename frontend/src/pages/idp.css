@@ -44,3 +44,20 @@
 .idp-modale{max-width:860px;width:100%;max-height:90vh;overflow:auto}
 .idp-choix{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin:.3rem 0;font-size:.86rem}
 .idp-choix select,.idp-registre select{padding:.35rem .5rem;border:1px solid #cbd5e1;border-radius:.5rem;background:var(--panel-bg,#fff);color:inherit;max-width:100%}
+
+
+/* Adaptation mobile/tablette : aucune colonne ne force le débordement horizontal. */
+@media (max-width: 640px) {
+  .idp-page, .idp-contenu, .idp-grille, .idp-detail, .idp-liste { min-width: 0; width: 100%; }
+  .idp-grille { grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+  .idp-detail__tete, .idp-liste__tete { align-items: stretch; flex-direction: column; }
+  .idp-champs { grid-template-columns: minmax(0, 1fr); }
+  .idp-actions { position: sticky; bottom: 0; z-index: 2; background: var(--panel-bg, #fff); padding: .65rem 0; }
+  .idp-actions > * { flex: 1 1 100%; min-height: 42px; }
+  .idp-section { padding: .65rem; min-width: 0; }
+  .idp-module { width: 100%; flex-wrap: wrap; }
+  .idp-module select { flex: 1; min-width: 0; }
+  .idp-modale { width: 100%; max-width: 100%; max-height: 88dvh; padding: .75rem; }
+  .idp-tableau__defilement { max-width: 100%; -webkit-overflow-scrolling: touch; }
+  .idp-tableau table { min-width: 560px; }
+}

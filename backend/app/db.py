@@ -65,8 +65,21 @@ class PoolParesseux:
 
 
 # Pool permanent vers la base centrale.
+def _options_tls():
+    """TLS PostgreSQL configurable ; verify-full + CA recommandé en production."""
+    options = {"sslmode": os.getenv("DB_SSLMODE", "prefer")}
+    ca = os.getenv("DB_SSLROOTCERT")
+    if ca:
+        options["sslrootcert"] = ca
+    cert = os.getenv("DB_SSLCERT")
+    key = os.getenv("DB_SSLKEY")
+    if cert and key:
+        options["sslcert"] = cert
+        options["sslkey"] = key
+    return options
+
 pool_central = PoolParesseux(POOL_CENTRAL_MAX, host=DB_HOST, port=DB_PORT, user=DB_USER,
-                             password=DB_PASSWORD, dbname=DB_CENTRAL_NAME)
+                             password=DB_PASSWORD, dbname=DB_CENTRAL_NAME, **_options_tls())
 
 # Cache des pools vers les bases entreprise (une base = un pool reutilise, cree
 # a la demande selon le mecanisme de routage multi-tenant).
@@ -82,6 +95,6 @@ def get_pool_entreprise(nom_base: str):
         existant = _pools_entreprise.get(nom_base)
         if existant is None:
             existant = PoolParesseux(POOL_ENTREPRISE_MAX, host=DB_HOST, port=DB_PORT, user=DB_USER,
-                                     password=DB_PASSWORD, dbname=nom_base)
+                                     password=DB_PASSWORD, dbname=nom_base, **_options_tls())
             _pools_entreprise[nom_base] = existant
         return existant

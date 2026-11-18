@@ -11,10 +11,10 @@ directement depuis ce formulaire (clientNom / clientEmail / clientTelephone).
 """
 
 import secrets
-import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.security.crypto import hacher_mot_de_passe
 from app.db import get_pool_entreprise
 from app.security.auth_dependency import exiger_role_admin
 from app.security.sessions import revoquer_sessions_par_email
@@ -95,7 +95,7 @@ def creer_utilisateur_externe(payload: NouvelUtilisateurExternePayload, utilisat
 
     pool_tenant = get_pool_entreprise(utilisateur["nomBase"])
     mot_de_passe_temporaire = secrets.token_urlsafe(9)
-    mot_de_passe_hash = bcrypt.hashpw(mot_de_passe_temporaire.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    mot_de_passe_hash = hacher_mot_de_passe(mot_de_passe_temporaire)
 
     conn = pool_tenant.getconn()
     try:

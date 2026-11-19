@@ -64,12 +64,30 @@ def dechiffrer(envelope:bytes, aad:bytes=b"erp-backup-v1")->bytes:
         raise ValueError("Enveloppe de chiffrement invalide.")
     return AESGCM(key).decrypt(nonce,ciphertext,aad)
 
-def signer(payload:bytes)->str:
-    return hmac.new(_key("ERP_HMAC_KEY"),payload,hashlib.sha256).hexdigest()
+def signer(payload: bytes, context: str = "") -> str:
+    """Signe un contenu avec un contexte optionnel."""
+    contextual_payload = (
+        context.encode("utf-8") + b"\0" + payload
+        if context
+        else payload
+    )
+    return hmac.new(
+        _key("ERP_HMAC_KEY"),
+        contextual_payload,
+        hashlib.sha256
+    ).hexdigest()
 
-def verifier_signature(payload:bytes, signature:str)->bool:
-    return hmac.compare_digest(signer(payload),signature or "")
 
+def verifier_signature(
+    payload: bytes,
+    signature: str,
+    context: str = ""
+) -> bool:
+    """Vérifie la signature avec le contexte fourni."""
+    return hmac.compare_digest(
+        signer(payload, context),
+        signature or ""
+    )
 def hacher_mot_de_passe(password:str)->str:
     return _hasher.hash(password)
 
